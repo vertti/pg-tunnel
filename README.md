@@ -11,8 +11,10 @@ pg-tunnel run development -- uv run jupyter lab
 ```
 
 This is an early implementation. Automated tests exercise local TLS/database
-handshakes, subprocesses, token renewal, and cleanup; a live AWS acceptance test
-is still required before a release.
+handshakes, subprocesses, token renewal, and cleanup. Live AWS testing on macOS
+has verified IAM read-only access through SSM with psql and concurrent Python
+connections. A delayed remote termination after Ctrl-C remains under investigation;
+see [the acceptance notes](docs/live-acceptance.md) for scope.
 
 ## Setup
 
