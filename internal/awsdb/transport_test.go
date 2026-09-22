@@ -38,9 +38,9 @@ func TestMain(m *testing.M) {
 }
 
 type localSSM struct {
-	fakeSSM
 	port chan string
 	url  string
+	fakeSSM
 }
 
 // StartSession directs the real embedded AWS code to a local WebSocket fixture.

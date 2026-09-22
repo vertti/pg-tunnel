@@ -56,5 +56,35 @@ AWS credential-cache renewal and recovery after a temporary provider failure.
 
 Live normal exit, client failure, and SIGINT checks preserved statuses 0, 23,
 and 130, removed private files, and reached Terminated within the 30-second
-observation window without an extra API retry. No cloud-status polling or
-additional AWS permissions were added to the production shutdown path.
+observation window without an extra API retry. The final implementation passed
+all three checks again.
+
+Graceful shutdown can finish the session before the fallback TerminateSession
+call, causing AWS to reject it as no longer in a valid state. On API failure,
+we now query that session's history once and accept only a matching Terminated
+record. Missing history, another status, or denied access keeps the cleanup
+error visible. This confirmation requires `ssm:DescribeSessions`; it is not
+called after successful termination requests. Cleanup retains its existing
+five-second deadline and does not poll or repeat successful API calls.
+
+Requesting API termination before stopping the plugin did not resolve the
+remote-status delay in live experiments; that ordering was discarded. All
+experimental sessions were subsequently confirmed Terminated. The final code
+addresses the demonstrated signal mismatch and already-terminated race; a
+successful API response alone still means termination was requested, not that
+its final cloud status was observed.
+
+## Token renewal follow-up
+
+A live session ran beyond its original 15-minute IAM token lifetime. Fresh
+psycopg2 connections succeeded every minute with read-only transactions and
+verified TLS. The private password file changed at 12 minutes, retained mode
+0600, and a fresh connection succeeded 30 seconds after the original token
+expired. Both private client files disappeared on exit, and SSM confirmed the
+session terminated.
+
+The run used AWS Vault's renewable credential server, but its underlying AWS
+credentials did not expire during the test. Actual AWS credential rotation is
+therefore not live-verified. A deterministic test using the real AWS credential
+cache covers expiry, transient provider failure, and recovery with replacement
+credentials.
