@@ -3,10 +3,12 @@ package awsdb_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -111,7 +114,19 @@ func TestIAMRetrievesCredentialsOnEveryRefresh(t *testing.T) {
 	assert.Equal(t, 2, calls)
 }
 
-type fakeSSM struct{ terminated string }
+type fakeSSM struct {
+	historyInput   *ssm.DescribeSessionsInput
+	terminationErr error
+	historyErr     error
+	terminated     string
+	history        []types.Session
+}
+
+// DescribeSessions returns the configured remote cleanup outcome.
+func (f *fakeSSM) DescribeSessions(_ context.Context, input *ssm.DescribeSessionsInput, _ ...func(*ssm.Options)) (*ssm.DescribeSessionsOutput, error) {
+	f.historyInput = input
+	return &ssm.DescribeSessionsOutput{Sessions: f.history}, f.historyErr
+}
 
 // StartSession returns synthetic session details without contacting AWS.
 func (*fakeSSM) StartSession(context.Context, *ssm.StartSessionInput, ...func(*ssm.Options)) (*ssm.StartSessionOutput, error) {
@@ -121,7 +136,7 @@ func (*fakeSSM) StartSession(context.Context, *ssm.StartSessionInput, ...func(*s
 // TerminateSession records remote cleanup.
 func (f *fakeSSM) TerminateSession(_ context.Context, input *ssm.TerminateSessionInput, _ ...func(*ssm.Options)) (*ssm.TerminateSessionOutput, error) {
 	f.terminated = aws.ToString(input.SessionId)
-	return &ssm.TerminateSessionOutput{}, nil
+	return &ssm.TerminateSessionOutput{}, f.terminationErr
 }
 
 func TestPluginFailureTerminatesRemoteSession(t *testing.T) {
@@ -134,4 +149,78 @@ func TestPluginFailureTerminatesRemoteSession(t *testing.T) {
 	require.ErrorContains(t, err, "embedded SSM child exited")
 	assert.NotContains(t, err.Error(), "sensitive-token")
 	assert.Equal(t, "session-example", api.terminated)
+}
+
+func TestIAMRefreshesCachedAWSCredentialsAfterProviderRecovery(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		failure := errors.New("credential provider temporarily unavailable")
+		cache := aws.NewCredentialsCache(providerFunc(func(context.Context) (aws.Credentials, error) {
+			calls++
+			if calls == 2 {
+				return aws.Credentials{}, failure
+			}
+			return aws.Credentials{AccessKeyID: fmt.Sprintf("access-%d", calls), SecretAccessKey: "test-secret", SessionToken: "test-session", CanExpire: true, Expires: time.Now().Add(5 * time.Minute)}, nil
+		}), func(options *aws.CredentialsCacheOptions) { options.ExpiryWindow = 2 * time.Minute })
+		auth := awsdb.IAM{Region: "eu-central-1", Provider: cache}
+		target := session.Target{Host: "db.example", Port: 5432, User: "reader"}
+		first, err := auth.Credential(t.Context(), target)
+		require.NoError(t, err)
+		assert.Contains(t, first.Secret, "X-Amz-Credential=access-1%2F")
+		time.Sleep(4 * time.Minute)
+		_, err = auth.Credential(t.Context(), target)
+		require.ErrorIs(t, err, failure)
+		replacement, err := auth.Credential(t.Context(), target)
+		require.NoError(t, err)
+		assert.Contains(t, replacement.Secret, "X-Amz-Credential=access-3%2F")
+		assert.True(t, replacement.ExpiresAt.After(first.ExpiresAt))
+	})
+}
+
+func TestRemoteCleanupConfirmsFailedTermination(t *testing.T) {
+	t.Parallel()
+	failure := errors.New("termination rejected")
+	denied := errors.New("history access denied")
+	for _, test := range []struct {
+		terminationErr error
+		historyErr     error
+		name           string
+		id             string
+		status         types.SessionStatus
+		wantFailure    bool
+	}{
+		{name: "accepted"},
+		{name: "already terminated", terminationErr: failure, id: "session-example", status: types.SessionStatusTerminated},
+		{name: "still terminating", terminationErr: failure, id: "session-example", status: types.SessionStatusTerminating, wantFailure: true},
+		{name: "different session", terminationErr: failure, id: "other", status: types.SessionStatusTerminated, wantFailure: true},
+		{name: "no history", terminationErr: failure, wantFailure: true},
+		{name: "history denied", terminationErr: failure, historyErr: denied, wantFailure: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			api := &fakeSSM{terminationErr: test.terminationErr, historyErr: test.historyErr}
+			if test.id != "" {
+				api.history = []types.Session{{SessionId: aws.String(test.id), Status: test.status}}
+			}
+			transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: filepath.Join(t.TempDir(), "missing")}
+			_, err := transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
+			require.ErrorContains(t, err, "launch embedded SSM child")
+			if test.wantFailure {
+				require.ErrorIs(t, err, failure)
+			} else {
+				require.NotErrorIs(t, err, failure)
+			}
+			if test.historyErr != nil {
+				require.ErrorIs(t, err, denied)
+			}
+			if test.terminationErr == nil {
+				assert.Nil(t, api.historyInput)
+			} else {
+				require.NotNil(t, api.historyInput)
+				assert.Equal(t, types.SessionStateHistory, api.historyInput.State)
+				assert.Equal(t, []types.SessionFilter{{Key: types.SessionFilterKeySessionId, Value: aws.String("session-example")}}, api.historyInput.Filters)
+			}
+		})
+	}
 }

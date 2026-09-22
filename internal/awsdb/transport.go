@@ -14,6 +14,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/aws/aws-sdk-go-v2/service/ssm/types"
 
 	"github.com/vertti/pg-tunnel/internal/process"
 	"github.com/vertti/pg-tunnel/internal/session"
@@ -22,6 +23,7 @@ import (
 
 // SSMAPI is the session lifecycle used by the transport.
 type SSMAPI interface {
+	DescribeSessions(context.Context, *ssm.DescribeSessionsInput, ...func(*ssm.Options)) (*ssm.DescribeSessionsOutput, error)
 	StartSession(context.Context, *ssm.StartSessionInput, ...func(*ssm.Options)) (*ssm.StartSessionOutput, error)
 	TerminateSession(context.Context, *ssm.TerminateSessionInput, ...func(*ssm.Options)) (*ssm.TerminateSessionOutput, error)
 }
@@ -158,12 +160,32 @@ func (t *tunnel) Close(ctx context.Context) error {
 		if t.sessionID == "" {
 			return
 		}
-		_, err := t.api.TerminateSession(ctx, &ssm.TerminateSessionInput{SessionId: aws.String(t.sessionID)})
-		if err != nil {
-			t.closeErr = errors.Join(t.closeErr, fmt.Errorf("terminate SSM session %s; check ssm:TerminateSession permission: %w", t.sessionID, err))
-		}
+		t.closeErr = errors.Join(t.closeErr, t.terminateRemote(ctx))
 	})
 	return t.closeErr
+}
+
+// The graceful plugin can finish the session before our fallback API call.
+// Confirm that outcome on API failure; never assume a rejected request succeeded.
+func (t *tunnel) terminateRemote(ctx context.Context) error {
+	_, err := t.api.TerminateSession(ctx, &ssm.TerminateSessionInput{SessionId: aws.String(t.sessionID)})
+	if err == nil {
+		return nil
+	}
+	terminationErr := fmt.Errorf("terminate SSM session %s: %w", t.sessionID, err)
+	history, err := t.api.DescribeSessions(ctx, &ssm.DescribeSessionsInput{
+		State:   types.SessionStateHistory,
+		Filters: []types.SessionFilter{{Key: types.SessionFilterKeySessionId, Value: aws.String(t.sessionID)}},
+	})
+	if err != nil {
+		return errors.Join(terminationErr, fmt.Errorf("confirm SSM session termination (requires ssm:DescribeSessions): %w", err))
+	}
+	for _, item := range history.Sessions {
+		if aws.ToString(item.SessionId) == t.sessionID && item.Status == types.SessionStatusTerminated {
+			return nil
+		}
+	}
+	return terminationErr
 }
 
 func (t *tunnel) waitReady(ctx context.Context) error {
