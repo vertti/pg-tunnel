@@ -36,8 +36,11 @@ The example contains no real infrastructure identifiers or credentials.
 mise exec -- ./bin/pg-tunnel run development -- psql
 ```
 
-Mise pins the Go toolchain, development checks, and official AWS Session Manager
-plugin. The runtime requires the `pg-tunnel` binary and `session-manager-plugin`
+Mise pins the Go toolchain and development checks on both supported platforms,
+and the official AWS Session Manager plugin on macOS. The upstream aqua package
+does not provide Linux artifacts; Linux users must also install AWS's
+[official Linux package](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+(version 1.2.835.0 or newer). The runtime requires the `pg-tunnel` binary and `session-manager-plugin`
 on PATH. It does not require the AWS CLI, Go, or the linters. AWS CLI or AWS Vault
 may still be useful for your organization's login workflow.
 

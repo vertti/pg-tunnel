@@ -55,7 +55,7 @@ func (s *SSM) Open(ctx context.Context, target session.Target) (_ session.Tunnel
 	}
 	path, err := exec.LookPath(plugin)
 	if err != nil {
-		return nil, fmt.Errorf("find session-manager-plugin; install it with mise install: %w", err)
+		return nil, fmt.Errorf("find session-manager-plugin; run mise install on macOS or install AWS's official Linux package: %w", err)
 	}
 	port, err := availablePort(ctx, s.LocalPort)
 	if err != nil {

@@ -2,7 +2,9 @@
 go = "1.27.1"
 golangci-lint = "2.13.2"
 actionlint = "1.7.12"
-"aqua:aws/session-manager-plugin" = "1.2.835.0"
+# The upstream aqua package publishes only macOS archives. Linux users install
+# AWS's official distro package; the CI fakes do not require the live plugin.
+"aqua:aws/session-manager-plugin" = { version = "1.2.835.0", os = ["macos"] }
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.8.0"
 
 [env]
