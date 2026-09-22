@@ -1,2 +1,38 @@
 [tools]
 go = "1.27.1"
+golangci-lint = "2.13.2"
+actionlint = "1.7.12"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.8.0"
+
+[env]
+GOTOOLCHAIN = "local"
+
+[tasks.fmt]
+description = "Format Go code and imports"
+run = "golangci-lint fmt"
+
+[tasks.lint]
+description = "Check configuration, formatting, static analysis, workflows, and modules"
+run = [
+  "golangci-lint config verify",
+  "golangci-lint run",
+  "actionlint",
+  "go mod tidy -diff",
+  "go mod verify",
+]
+
+[tasks.test]
+description = "Run tests with race detection, randomized order, and coverage"
+run = "go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=coverage.out ./..."
+
+[tasks.build]
+description = "Build the CLI into bin/pg-tunnel"
+run = 'go build -trimpath -ldflags="-s -w" -o bin/pg-tunnel ./cmd/pg-tunnel'
+
+[tasks.vuln]
+description = "Check reachable code against the Go vulnerability database"
+run = "govulncheck ./..."
+
+[tasks.ci]
+description = "Run the same quality, test, and build checks as GitHub Actions"
+run = ["mise run lint", "mise run test", "mise run build", "mise run vuln"]

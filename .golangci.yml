@@ -1,0 +1,108 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - canonicalheader
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - cyclop
+    - durationcheck
+    - errcheck
+    - errchkjson
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - forbidigo
+    - gocognit
+    - gocritic
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - intrange
+    - makezero
+    - mirror
+    - nilerr
+    - nilnesserr
+    - noctx
+    - nolintlint
+    - perfsprint
+    - predeclared
+    - reassign
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - testableexamples
+    - testifylint
+    - testpackage
+    - tparallel
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+    - whitespace
+    - wrapcheck
+  settings:
+    cyclop:
+      max-complexity: 10
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    exhaustive:
+      check: [switch, map]
+    forbidigo:
+      forbid:
+        - pattern: '^os\.Setenv$'
+          msg: "Use t.Setenv in tests; pass child environments explicitly in production."
+    gocognit:
+      min-complexity: 15
+    gocritic:
+      enabled-tags: [diagnostic, style, performance]
+    gocyclo:
+      min-complexity: 10
+    govet:
+      enable-all: true
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      enable-default-rules: true
+      severity: error
+      rules:
+        - name: exported
+          arguments: [checkPrivateReceivers, disableStutteringCheck]
+    testifylint:
+      enable-all: true
+  exclusions:
+    presets: []
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra:
+        group-params: true
+        clothe-returns: true
+        balance-calls: true
+    goimports:
+      local-prefixes:
+        - github.com/vertti/pg-tunnel
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

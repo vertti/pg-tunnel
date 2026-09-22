@@ -3,3 +3,7 @@
 
 # macOS metadata
 .DS_Store
+
+# Build and test output
+/bin/
+/coverage.out
