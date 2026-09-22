@@ -3,10 +3,12 @@ package awsdb_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -134,4 +136,31 @@ func TestPluginFailureTerminatesRemoteSession(t *testing.T) {
 	require.ErrorContains(t, err, "embedded SSM child exited")
 	assert.NotContains(t, err.Error(), "sensitive-token")
 	assert.Equal(t, "session-example", api.terminated)
+}
+
+func TestIAMRefreshesCachedAWSCredentialsAfterProviderRecovery(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		failure := errors.New("credential provider temporarily unavailable")
+		cache := aws.NewCredentialsCache(providerFunc(func(context.Context) (aws.Credentials, error) {
+			calls++
+			if calls == 2 {
+				return aws.Credentials{}, failure
+			}
+			return aws.Credentials{AccessKeyID: fmt.Sprintf("access-%d", calls), SecretAccessKey: "test-secret", SessionToken: "test-session", CanExpire: true, Expires: time.Now().Add(5 * time.Minute)}, nil
+		}), func(options *aws.CredentialsCacheOptions) { options.ExpiryWindow = 2 * time.Minute })
+		auth := awsdb.IAM{Region: "eu-central-1", Provider: cache}
+		target := session.Target{Host: "db.example", Port: 5432, User: "reader"}
+		first, err := auth.Credential(t.Context(), target)
+		require.NoError(t, err)
+		assert.Contains(t, first.Secret, "X-Amz-Credential=access-1%2F")
+		time.Sleep(4 * time.Minute)
+		_, err = auth.Credential(t.Context(), target)
+		require.ErrorIs(t, err, failure)
+		replacement, err := auth.Credential(t.Context(), target)
+		require.NoError(t, err)
+		assert.Contains(t, replacement.Secret, "X-Amz-Credential=access-3%2F")
+		assert.True(t, replacement.ExpiresAt.After(first.ExpiresAt))
+	})
 }
