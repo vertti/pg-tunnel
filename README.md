@@ -36,13 +36,11 @@ The example contains no real infrastructure identifiers or credentials.
 mise exec -- ./bin/pg-tunnel run development -- psql
 ```
 
-Mise pins the Go toolchain and development checks on both supported platforms,
-and the official AWS Session Manager plugin on macOS. The upstream aqua package
-does not provide Linux artifacts; Linux users must also install AWS's
-[official Linux package](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
-(version 1.2.835.0 or newer). The runtime requires the `pg-tunnel` binary and `session-manager-plugin`
-on PATH. It does not require the AWS CLI, Go, or the linters. AWS CLI or AWS Vault
-may still be useful for your organization's login workflow.
+Mise pins the Go toolchain and development checks. The runtime is a single
+`pg-tunnel` executable: AWS's official Session Manager forwarding code is compiled
+in, so there is no separate plugin to install. Go, mise, the linters, and the AWS
+CLI are not runtime requirements. AWS CLI or AWS Vault may still be useful for
+your organization's login workflow.
 
 ## Connection profiles
 
@@ -159,7 +157,23 @@ requests and pushes to `main`.
 
 The core interfaces live in `internal/session`. AWS discovery/authentication and
 SSM transport live in `internal/awsdb`; `internal/libpq` owns credential files and
-the TLS/IAM readiness check; `internal/process` owns process groups. Profiles and
-CLI wiring remain separate from those providers.
+the TLS/IAM readiness check; `internal/process` owns process groups. The small
+`internal/ssmplugin` adapter runs AWS code in an isolated copy of our executable.
+Profiles and CLI wiring remain separate from those providers.
 
 See [the footprint measurements](docs/footprint.md) for the initial size budget.
+
+The official SSM source is pinned to commit
+[`930a08e65d3a`](https://github.com/aws/session-manager-plugin/commit/930a08e65d3a378eeeebb7f1bcf67eae7d860ae0).
+Its port handler registers in an internal `__ssm` child mode, before our usual
+signal setup. AWS's signal handlers and `os.Exit` calls therefore cannot bypass
+the supervisor's credential cleanup. Session tokens go through the child
+environment, not command arguments. We maintain the adapter, not the SSM protocol.
+
+Upstream is an executable-oriented project without a root `go.mod`; keep its
+revision and dependencies pinned, including the historical `twinj/uuid` version.
+Run the local WebSocket cancellation test and live remote-host forwarding checks
+when upgrading it. Upstream's built-in version is `1.3.0.0` for feature negotiation;
+the pinned commit identifies the actual source revision. Preserve the
+[upstream license and notices](third_party/session-manager-plugin/) in release
+packages alongside the binary.

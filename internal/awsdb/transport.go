@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/vertti/pg-tunnel/internal/process"
 	"github.com/vertti/pg-tunnel/internal/session"
+	"github.com/vertti/pg-tunnel/internal/ssmplugin"
 )
 
 // SSMAPI is the session lifecycle used by the transport.
@@ -28,12 +28,12 @@ type SSMAPI interface {
 
 // SSM supervises the official plugin and owns the corresponding remote session.
 type SSM struct {
-	API       SSMAPI
-	Target    string
-	Region    string
-	Profile   string
-	Plugin    string
-	LocalPort int
+	API        SSMAPI
+	Target     string
+	Region     string
+	Profile    string
+	Executable string // Overrides os.Executable for process test harnesses.
+	LocalPort  int
 }
 
 type tunnel struct {
@@ -49,13 +49,13 @@ type tunnel struct {
 
 // Open starts a remote forwarding session and waits for the local listener.
 func (s *SSM) Open(ctx context.Context, target session.Target) (_ session.Tunnel, result error) {
-	plugin := s.Plugin
-	if plugin == "" {
-		plugin = "session-manager-plugin"
-	}
-	path, err := exec.LookPath(plugin)
-	if err != nil {
-		return nil, fmt.Errorf("find session-manager-plugin; run mise install on macOS or install AWS's official Linux package: %w", err)
+	path := s.Executable
+	if path == "" {
+		var err error
+		path, err = os.Executable()
+		if err != nil {
+			return nil, fmt.Errorf("locate pg-tunnel executable for SSM child: %w", err)
+		}
 	}
 	port, err := availablePort(ctx, s.LocalPort)
 	if err != nil {
@@ -94,7 +94,7 @@ func (s *SSM) launch(ctx context.Context, path string, input *ssm.StartSessionIn
 	}
 	handle.process, err = process.Start(ctx, args, env, nil, handle.logs, handle.logs)
 	if err != nil {
-		return fmt.Errorf("launch SSM plugin: %w", err)
+		return fmt.Errorf("launch embedded SSM child: %w", err)
 	}
 	return handle.waitReady(ctx)
 }
@@ -112,8 +112,8 @@ func (s *SSM) pluginCommand(ctx context.Context, path string, input *ssm.StartSe
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve SSM endpoint: %w", err)
 	}
-	const responseEnv = "AWS_SSM_START_SESSION_RESPONSE"
-	args = []string{path, responseEnv, s.Region, "StartSession", s.Profile, string(request), endpoint.URI.String()}
+	const responseEnv = ssmplugin.ResponseEnv
+	args = []string{path, ssmplugin.Command, responseEnv, s.Region, "StartSession", s.Profile, string(request), endpoint.URI.String()}
 	env = append(os.Environ(), responseEnv+"="+string(response))
 	return args, env, nil
 }
@@ -146,7 +146,7 @@ func (t *tunnel) Err() error {
 	if err == nil {
 		err = errors.New("unexpected successful exit")
 	}
-	return fmt.Errorf("session-manager-plugin exited: %s: %w", strings.ReplaceAll(t.logs.String(), t.token, "[redacted]"), err)
+	return fmt.Errorf("embedded SSM child exited: %s: %w", strings.ReplaceAll(t.logs.String(), t.token, "[redacted]"), err)
 }
 
 // Close terminates both the local plugin and remote session.
@@ -172,7 +172,7 @@ func (t *tunnel) waitReady(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("waiting for local tunnel listener; check the SSM agent, plugin, and remote connectivity: %w", ctx.Err())
+			return fmt.Errorf("waiting for local tunnel listener; check the SSM agent, embedded child, and remote connectivity: %w", ctx.Err())
 		case <-t.Done():
 			return t.Err()
 		case <-ticker.C:

@@ -129,9 +129,9 @@ func TestPluginFailureTerminatesRemoteSession(t *testing.T) {
 	plugin := filepath.Join(t.TempDir(), "plugin")
 	require.NoError(t, os.WriteFile(plugin, []byte("#!/bin/sh\nprintf 'sensitive-token\\n'\nexit 7\n"), 0o700)) //nolint:gosec // The fake plugin must be executable by the test owner.
 	api := &fakeSSM{}
-	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Plugin: plugin}
+	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: plugin}
 	_, err := transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
-	require.ErrorContains(t, err, "session-manager-plugin exited")
+	require.ErrorContains(t, err, "embedded SSM child exited")
 	assert.NotContains(t, err.Error(), "sensitive-token")
 	assert.Equal(t, "session-example", api.terminated)
 }
