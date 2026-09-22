@@ -1,0 +1,206 @@
+// Package session owns the lifecycle of a database connection environment.
+package session
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+// Target separates the database identity from the local transport address.
+type Target struct {
+	Host     string
+	Database string
+	User     string
+	RootCert string
+	Port     int
+}
+
+// Credential is a renewable database authentication secret.
+type Credential struct {
+	ExpiresAt time.Time
+	Secret    string
+}
+
+// String keeps credentials out of diagnostic output.
+func (Credential) String() string { return "[redacted credential]" }
+
+// GoString also redacts Go-syntax formatting.
+func (c Credential) GoString() string { return c.String() }
+
+// Resolver discovers the database endpoint.
+type Resolver interface {
+	Resolve(context.Context) (Target, error)
+}
+
+// Auth obtains a fresh credential using the current identity.
+type Auth interface {
+	Credential(context.Context, Target) (Credential, error)
+}
+
+// Tunnel owns a transport and its eventual exit status.
+type Tunnel interface {
+	Port() int
+	Done() <-chan struct{}
+	Err() error
+	Close(context.Context) error
+}
+
+// Transport opens a supervised local connection to a database.
+type Transport interface {
+	Open(context.Context, Target) (Tunnel, error)
+}
+
+// Client owns per-session client configuration.
+type Client interface {
+	Update(Credential) error
+	Env([]string) []string
+	Close() error
+}
+
+// Clients creates client-specific connection settings.
+type Clients interface {
+	Prepare(Target, int, Credential) (Client, error)
+}
+
+// Verify checks actual database authentication through the local transport.
+type Verify func(context.Context, Target, int, Credential) error
+
+// Command runs the user's process and waits for its exit.
+type Command func(context.Context, []string) error
+
+// Runner composes providers while retaining sole ownership of cleanup.
+type Runner struct {
+	Resolver  Resolver
+	Transport Transport
+	Auth      Auth
+	Clients   Clients
+	Verify    Verify
+	Command   Command
+	Report    func(string)
+	Env       []string
+}
+
+// Run starts a database session, runs its command, and closes every resource.
+func (r *Runner) Run(ctx context.Context) (result error) {
+	startupCtx, startupCancel := context.WithTimeout(ctx, time.Minute)
+	defer startupCancel()
+	target, err := r.Resolver.Resolve(startupCtx)
+	if err != nil {
+		return fmt.Errorf("discover database: %w", err)
+	}
+	r.report(fmt.Sprintf("Database: %s:%d (%s, user %s)", target.Host, target.Port, target.Database, target.User))
+
+	tunnel, err := r.Transport.Open(startupCtx, target)
+	if err != nil {
+		return fmt.Errorf("open tunnel: %w", err)
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		result = errors.Join(result, tunnel.Close(cleanupCtx))
+	}()
+
+	credential, err := r.Auth.Credential(startupCtx, target)
+	if err != nil {
+		return fmt.Errorf("obtain database credential: %w", err)
+	}
+	if err = r.Verify(startupCtx, target, tunnel.Port(), credential); err != nil {
+		return fmt.Errorf("verify database authentication: %w", err)
+	}
+
+	client, err := r.Clients.Prepare(target, tunnel.Port(), credential)
+	if err != nil {
+		return fmt.Errorf("prepare client settings: %w", err)
+	}
+	defer func() { result = errors.Join(result, client.Close()) }()
+	r.report(fmt.Sprintf("Database authentication verified; tunnel: 127.0.0.1:%d", tunnel.Port()))
+	r.reportExpiry(credential)
+	startupCancel()
+	return r.runCommand(ctx, target, tunnel, client, credential)
+}
+
+func (r *Runner) runCommand(ctx context.Context, target Target, tunnel Tunnel, client Client, credential Credential) error {
+	runCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	refreshDone := make(chan struct{})
+	go func() {
+		defer close(refreshDone)
+		r.refresh(runCtx, target, client, credential)
+	}()
+	defer func() { cancel(nil); <-refreshDone }()
+
+	commandDone := make(chan error, 1)
+	go func() { commandDone <- r.Command(runCtx, client.Env(r.Env)) }()
+	select {
+	case err := <-commandDone:
+		return err
+	case <-tunnel.Done():
+		err := fmt.Errorf("tunnel stopped; child command is being stopped: %w", tunnelError(tunnel.Err()))
+		cancel(err)
+		return errors.Join(err, <-commandDone)
+	}
+}
+
+func tunnelError(err error) error {
+	if err == nil {
+		return errors.New("transport exited unexpectedly")
+	}
+	return err
+}
+
+func (r *Runner) refresh(ctx context.Context, target Target, client Client, current Credential) {
+	delay := renewalDelay(current)
+	backoff := 5 * time.Second
+	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		next, err := r.renew(ctx, target, client)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			delay = backoff
+			backoff = min(backoff*2, time.Minute)
+			r.report(fmt.Sprintf("Credential refresh failed: %v. Last published token expires %s; retry in %s. Existing connections are not closed by token expiry.", err, current.ExpiresAt.Format(time.RFC3339), delay))
+			continue
+		}
+		current = next
+		backoff = 5 * time.Second
+		delay = renewalDelay(current)
+		r.reportExpiry(current)
+	}
+}
+
+func (r *Runner) renew(ctx context.Context, target Target, client Client) (Credential, error) {
+	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	credential, err := r.Auth.Credential(refreshCtx, target)
+	if err != nil {
+		return Credential{}, fmt.Errorf("obtain replacement token: %w", err)
+	}
+	if err = client.Update(credential); err != nil {
+		return Credential{}, fmt.Errorf("publish replacement token: %w", err)
+	}
+	return credential, nil
+}
+
+func renewalDelay(credential Credential) time.Duration {
+	return max(time.Until(credential.ExpiresAt.Add(-3*time.Minute)), time.Second)
+}
+
+func (r *Runner) report(message string) {
+	if r.Report != nil {
+		r.Report(message)
+	}
+}
+
+func (r *Runner) reportExpiry(credential Credential) {
+	r.report(fmt.Sprintf("IAM token expires %s; refresh in %s. Token expiry does not close established connections.", credential.ExpiresAt.Format(time.RFC3339), renewalDelay(credential).Round(time.Second)))
+}

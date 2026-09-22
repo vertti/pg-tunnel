@@ -25,7 +25,7 @@ func TestHelp(t *testing.T) {
 
 	var output bytes.Buffer
 	require.NoError(t, cli.Run([]string{"--help"}, &output))
-	assert.Contains(t, output.String(), "Usage of pg-tunnel:")
+	assert.Contains(t, output.String(), "Usage: pg-tunnel run")
 	assert.Contains(t, output.String(), "-version")
 }
 
@@ -38,15 +38,15 @@ func TestUnknownOption(t *testing.T) {
 	assert.Contains(t, output.String(), "flag provided but not defined")
 }
 
-func TestUnimplementedCommands(t *testing.T) {
+func TestIncompleteCommands(t *testing.T) {
 	t.Parallel()
 
-	for _, args := range [][]string{nil, {"connect", "bioml"}, {"--version", "unexpected"}} {
+	for _, args := range [][]string{nil, {"connect"}, {"run", "bioml"}, {"--version", "unexpected"}} {
 		t.Run("args="+strings.Join(args, " "), func(t *testing.T) {
 			t.Parallel()
 
 			var output bytes.Buffer
-			require.ErrorIs(t, cli.Run(args, &output), cli.ErrNotImplemented)
+			require.ErrorIs(t, cli.Run(args, &output), cli.ErrUsage)
 			assert.Empty(t, output.String())
 		})
 	}
