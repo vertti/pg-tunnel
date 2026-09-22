@@ -7,3 +7,7 @@
 # Build and test output
 /bin/
 /coverage.out
+
+# Local connection profiles and downloaded AWS trust roots
+/pg-tunnel.json
+/global-bundle.pem

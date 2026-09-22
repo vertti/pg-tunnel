@@ -2,19 +2,42 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 )
 
-// ErrNotImplemented indicates that database tunneling is not available yet.
-var ErrNotImplemented = errors.New("database tunneling is not implemented yet; use -help for available options")
+// ErrUsage indicates an incomplete or unsupported command.
+var ErrUsage = errors.New("use pg-tunnel run [--config pg-tunnel.json] PROFILE -- COMMAND, connect PROFILE, or cleanup")
 
 // Run parses command-line options and writes help or version information.
 func Run(args []string, output io.Writer) error {
+	return RunContext(context.Background(), args, output)
+}
+
+// RunContext executes commands until completion or cancellation.
+func RunContext(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "run", "connect":
+			return runSession(ctx, args[0], args[1:], output)
+		case "cleanup":
+			if len(args) != 1 {
+				return ErrUsage
+			}
+			return cleanup()
+		}
+	}
 	flags := flag.NewFlagSet("pg-tunnel", flag.ContinueOnError)
 	flags.SetOutput(output)
+	flags.Usage = func() {
+		fmt.Fprintln(output, "Usage: pg-tunnel run [--config pg-tunnel.json] PROFILE -- COMMAND") //nolint:errcheck // flag.Usage has no error return; normal command output errors are returned separately.
+		fmt.Fprintln(output, "       pg-tunnel connect [--config pg-tunnel.json] PROFILE")        //nolint:errcheck // flag.Usage has no error return.
+		fmt.Fprintln(output, "       pg-tunnel cleanup")                                          //nolint:errcheck // flag.Usage has no error return.
+		flags.PrintDefaults()
+	}
 	version := flags.Bool("version", false, "print the development version")
 
 	if err := flags.Parse(args); err != nil {
@@ -26,7 +49,7 @@ func Run(args []string, output io.Writer) error {
 	}
 
 	if flags.NArg() > 0 || !*version {
-		return ErrNotImplemented
+		return ErrUsage
 	}
 
 	if _, err := fmt.Fprintln(output, "pg-tunnel dev"); err != nil {

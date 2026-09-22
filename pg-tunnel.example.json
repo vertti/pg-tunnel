@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "development": {
+      "db_instance": "my-postgres",
+      "database": "my_database",
+      "user": "my_reader",
+      "jump_tag": "my-database-jump-host",
+      "region": "eu-central-1",
+      "aws_profile": "development",
+      "sslrootcert": "global-bundle.pem"
+    }
+  }
+}
