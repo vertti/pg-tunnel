@@ -1,4 +1,4 @@
-# aws-pg-tunnel
+# pg-tunnel
 
 A planned developer utility for connecting PostgreSQL clients to private databases,
 starting with AWS RDS and Systems Manager Session Manager.
