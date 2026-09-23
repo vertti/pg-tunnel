@@ -1,3 +1,5 @@
+<img src="docs/assets/pg-tunnel-logo.png" alt="pg-tunnel logo" width="240">
+
 # pg-tunnel
 
 Connect PostgreSQL clients to private AWS RDS databases through SSM, with
