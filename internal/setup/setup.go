@@ -23,6 +23,7 @@ import (
 
 // Wizard discovers metadata using the caller's AWS credentials. It never reads secret values.
 type Wizard struct {
+	Verify     func(context.Context, *profile.Profile) error
 	Input      io.Reader
 	Output     io.Writer
 	Config     aws.Config
@@ -36,9 +37,12 @@ type prompt struct {
 	input  *bufio.Scanner
 }
 
-// Run previews a profile and saves it only after explicit confirmation.
+// Run previews a profile, then verifies and saves it after explicit confirmation.
 // Input must honor cancellation; the CLI supplies a cancellable terminal reader.
 func (w *Wizard) Run(ctx context.Context) error {
+	if w.Verify == nil {
+		return errors.New("setup requires a connection verifier")
+	}
 	ui := prompt{input: bufio.NewScanner(w.Input), output: w.Output}
 	id, err := account(ctx, &w.Config)
 	if err != nil {
@@ -179,10 +183,10 @@ func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error
 	if err != nil {
 		return fmt.Errorf("format profile preview: %w", err)
 	}
-	if printErr := ui.print("\nHere's the configuration we would save:\n\n%s\n\nDestination: %q\nThis adds a profile; an existing name will not be replaced. Database login has not been tested.\n", data, w.Path); printErr != nil {
+	if printErr := ui.print("\nHere's the configuration we would save:\n\n%s\n\nDestination: %q\nThis adds a profile; an existing name will not be replaced.\n", data, w.Path); printErr != nil {
 		return printErr
 	}
-	answer, err := ui.ask("Save this profile? (yes/no)", "no")
+	answer, err := ui.ask("Test and save this connection? (yes/no)", "no")
 	if err != nil {
 		return err
 	}
@@ -192,10 +196,28 @@ func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error
 	if err = ctx.Err(); err != nil {
 		return fmt.Errorf("setup cancelled before saving: %w", err)
 	}
+	if err := w.verify(ctx, ui, p); err != nil {
+		return err
+	}
 	if err := profile.Save(w.Path, name, p); err != nil {
 		return fmt.Errorf("save selected profile: %w", err)
 	}
-	return ui.print("Saved profile %q to %q. Verify access with:\n  pg-tunnel connect --config %s %s\n", name, w.Path, shellQuote(w.Path), shellQuote(name))
+	return ui.print("Saved verified connection %q to %q. Connect with:\n  pg-tunnel connect --config %s %s\n", name, w.Path, shellQuote(w.Path), shellQuote(name))
+}
+
+func (w *Wizard) verify(ctx context.Context, ui *prompt, p *profile.Profile) error {
+	if err := ui.print("Testing the SSM tunnel, TLS certificate, and database login...\n"); err != nil {
+		return err
+	}
+	// Verification resolves managed CA paths only in this copy; saved profiles stay portable.
+	candidate := *p
+	if err := w.Verify(ctx, &candidate); err != nil {
+		return fmt.Errorf("connection test failed; configuration was not saved: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("setup cancelled before saving: %w", err)
+	}
+	return ui.print("Connection test passed; temporary session cleaned up.\n")
 }
 
 func (p *prompt) print(format string, args ...any) error {

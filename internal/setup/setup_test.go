@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -102,13 +103,16 @@ func TestWizardDiscoversAcrossPagesAndSavesOnlyAfterConfirmation(t *testing.T) {
 			if answer != "EOF" {
 				input += answer + "\n"
 			}
-			wizard := setup.Wizard{Config: fixtureConfig(t, ""), Input: strings.NewReader(input), Output: &output, Path: path, RootCert: ca, AWSProfile: "dev"}
+			wizard := setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, ""), Input: strings.NewReader(input), Output: &output, Path: path, RootCert: ca, AWSProfile: "dev"}
+			verified := false
+			wizard.Verify = func(context.Context, *profile.Profile) error { verified = true; return nil }
 			err := wizard.Run(t.Context())
 			if answer == "EOF" {
 				require.ErrorContains(t, err, "input ended")
 			} else {
 				require.NoError(t, err)
 			}
+			assert.Equal(t, answer == "yes", verified, "verification requires confirmation")
 			assert.Contains(t, output.String(), "123456789012")
 			assert.Contains(t, output.String(), "RDS-linked master-user secret")
 			assert.NotContains(t, output.String(), "i-offline")
@@ -140,7 +144,7 @@ func TestWizardDiscoveryPermissionFailures(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			var output bytes.Buffer
-			wizard := setup.Wizard{Config: fixtureConfig(t, service), Input: strings.NewReader("1\n1\ni-manual\ndata\nreader\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
+			wizard := setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, service), Input: strings.NewReader("1\n1\ni-manual\ndata\nreader\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
 			err := wizard.Run(t.Context())
 			if service == "sts" || service == "rds" {
 				require.Error(t, err)
@@ -167,7 +171,7 @@ func TestWizardCancellationAndOutputFailureWriteNothing(t *testing.T) {
 				cancel()
 			}
 			path := filepath.Join(t.TempDir(), "profiles.json")
-			wizard := setup.Wizard{Config: fixtureConfig(t, ""), Input: strings.NewReader(""), Output: io.Discard, Path: path}
+			wizard := setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, ""), Input: strings.NewReader(""), Output: io.Discard, Path: path}
 			if !cancelled {
 				wizard.Output = brokenWriter{}
 			}
@@ -206,9 +210,69 @@ func TestWizardRejectsUnusableDatabaseAndCA(t *testing.T) {
 			})
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			input := "1\n1\ndata\nreader\n"
-			wizard := setup.Wizard{Config: cfg, Input: strings.NewReader(input), Output: io.Discard, Path: path, RootCert: filepath.Join(t.TempDir(), "missing.pem")}
+			wizard := setup.Wizard{Verify: successfulVerification, Config: cfg, Input: strings.NewReader(input), Output: io.Discard, Path: path, RootCert: filepath.Join(t.TempDir(), "missing.pem")}
 			require.ErrorContains(t, wizard.Run(t.Context()), tc.want)
 			assert.NoFileExists(t, path)
+		})
+	}
+}
+
+func successfulVerification(context.Context, *profile.Profile) error { return nil }
+
+func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
+	t.Parallel()
+	ca := certificate(t)
+	for _, result := range []string{"success", "login failure", "cleanup failure", "cancelled"} {
+		t.Run(result, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "profiles.json")
+			original := profile.Profile{DBInstance: "existing", Database: "data", User: "reader", Target: "i-existing", RootCert: ca, Port: 5432}
+			require.NoError(t, profile.Save(path, "existing", &original))
+			before, err := os.ReadFile(path) //nolint:gosec // The configuration is inside t.TempDir.
+			require.NoError(t, err)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			failure := errors.New(result)
+			var output bytes.Buffer
+			wizard := setup.Wizard{Config: fixtureConfig(t, ""), Input: strings.NewReader("1\n1\ndata\nreader\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
+			wizard.Verify = func(_ context.Context, candidate *profile.Profile) error {
+				// The new profile is not on disk while the test session is running.
+				current, readErr := os.ReadFile(path) //nolint:gosec // The configuration is inside t.TempDir.
+				require.NoError(t, readErr)
+				assert.Equal(t, before, current)
+				assert.Equal(t, "i-chosen", candidate.Target)
+				assert.Equal(t, "reader", candidate.User)
+				candidate.RootCert = "/temporary/resolved-ca.pem"
+				switch result {
+				case "success":
+					return nil
+				case "cancelled":
+					cancel()
+					return nil
+				default:
+					return failure
+				}
+			}
+			err = wizard.Run(ctx)
+			if result == "success" {
+				require.NoError(t, err)
+				saved, loadErr := profile.Load(path, "readonly")
+				require.NoError(t, loadErr)
+				assert.Equal(t, ca, saved.RootCert, "verification must not change saved settings")
+				assert.Contains(t, output.String(), "Saved verified connection")
+				assert.NotContains(t, output.String(), "Verify access with")
+				return
+			}
+			if result == "cancelled" {
+				require.ErrorIs(t, err, context.Canceled)
+			} else {
+				require.ErrorIs(t, err, failure)
+				require.ErrorContains(t, err, "configuration was not saved")
+			}
+			after, readErr := os.ReadFile(path) //nolint:gosec // The configuration is inside t.TempDir.
+			require.NoError(t, readErr)
+			assert.Equal(t, before, after)
+			assert.NotContains(t, output.String(), "Saved verified connection")
 		})
 	}
 }

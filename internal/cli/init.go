@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -53,6 +54,9 @@ func initProfile(ctx context.Context, args []string, output io.Writer) error {
 		return err
 	}
 	wizard := setup.Wizard{Input: terminalInput{fd: terminal, done: ctx.Done()}, Output: output, Config: cfg, AWSProfile: p.AWSProfile, RootCert: p.RootCert, Path: *path}
+	wizard.Verify = func(verifyCtx context.Context, candidate *profile.Profile) error {
+		return execute(verifyCtx, candidate, func(context.Context, []string) error { return nil }, log.New(output, "pg-tunnel: ", 0))
+	}
 	if err = wizard.Run(ctx); err != nil {
 		return fmt.Errorf("initialize profile: %w", err)
 	}

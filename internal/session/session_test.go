@@ -256,3 +256,30 @@ func TestInterruptedStartupClosesTunnel(t *testing.T) {
 	require.ErrorIs(t, runner.Run(ctx), context.Canceled)
 	assert.Equal(t, []string{"tunnel closed"}, *events)
 }
+
+func TestOneShotVerificationWaitsForCleanup(t *testing.T) {
+	t.Parallel()
+	for _, failCleanup := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "cleanup failure"}[failCleanup], func(t *testing.T) {
+			t.Parallel()
+			runner, tunnel, _, events := fixture()
+			authenticated := false
+			runner.Verify = func(context.Context, session.Target, int, session.Credential) error { authenticated = true; return nil }
+			runner.Command = func(context.Context, []string) error {
+				assert.True(t, authenticated)
+				assert.Empty(t, *events)
+				return nil
+			}
+			if failCleanup {
+				tunnel.closeError = errors.New("terminate session failed")
+			}
+			err := runner.Run(t.Context())
+			if failCleanup {
+				require.ErrorIs(t, err, tunnel.closeError)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, []string{"client closed", "tunnel closed"}, *events)
+		})
+	}
+}

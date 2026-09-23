@@ -33,16 +33,19 @@ still need AWS Vault to supply them. Add `--config pg-tunnel.json` to save local
 
 The wizard shows the account, lists RDS PostgreSQL instances in that region, and
 suggests running EC2 hosts that are online in SSM. Hosts in the database's VPC
-appear first; network access and database login are verified when you connect.
-Enter an existing IAM database user and database name, then review the profile
-before saving. RDS CA certificates are managed automatically. It adds to the shared user config by default,
-refuses to replace an existing profile name, and never changes AWS resources.
+appear first. Enter an existing IAM database user and database name, then review
+the profile. After you confirm, the wizard opens a temporary tunnel, verifies TLS
+and database authentication, and cleans up the session before saving. It sends no
+SQL queries. A failed test, cancellation, or cleanup error leaves the configuration
+unchanged. RDS CA certificates are managed automatically. Profiles are added to
+the shared user config by default; an existing name is never replaced.
 Use `--config` for the project file if one would shadow your shared configuration.
 
 Discovery needs `rds:DescribeDBInstances`, `ec2:DescribeInstances`, and
 `ssm:DescribeInstanceInformation`. It also calls STS `GetCallerIdentity` to show
 the account. If jump-host discovery is unavailable, you can enter the SSM target
-manually. RDS-linked master-user secret ARNs are shown as metadata only: the
+manually. Verification also needs the connection permissions listed below.
+RDS-linked master-user secret ARNs are shown as metadata only: the
 wizard does not read secret values, infer database users from secret names, or
 configure password authentication. This initial setup supports RDS PostgreSQL
 with IAM authentication.

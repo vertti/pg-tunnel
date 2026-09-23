@@ -58,11 +58,11 @@ func runSession(ctx context.Context, mode string, args []string, output io.Write
 	if err != nil {
 		return fmt.Errorf("load connection profile: %w", err)
 	}
-	return execute(ctx, &p, command, output)
+	logger := log.New(output, "pg-tunnel: ", 0)
+	return execute(ctx, &p, sessionCommand(command, logger), logger)
 }
 
-func execute(ctx context.Context, p *profile.Profile, command []string, output io.Writer) error {
-	logger := log.New(output, "pg-tunnel: ", 0)
+func execute(ctx context.Context, p *profile.Profile, command session.Command, logger *log.Logger) error {
 	report := func(message string) { logger.Print(message) }
 	setupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -96,7 +96,7 @@ func execute(ctx context.Context, p *profile.Profile, command []string, output i
 		Transport: &awsdb.SSM{API: ssm.NewFromConfig(cfg), Region: cfg.Region, Profile: p.AWSProfile, Target: jump, LocalPort: p.LocalPort},
 		Auth:      awsdb.IAM{Provider: cfg.Credentials, Region: cfg.Region, EnvironmentExpiry: envExpiry, Report: report},
 		Clients:   libpq.Files{Root: root}, Verify: libpq.Verify, Env: os.Environ(), Report: report,
-		Command: sessionCommand(command, report),
+		Command: command,
 	}
 	if err = runner.Run(ctx); err != nil {
 		return fmt.Errorf("database session: %w", err)
@@ -104,7 +104,8 @@ func execute(ctx context.Context, p *profile.Profile, command []string, output i
 	return nil
 }
 
-func sessionCommand(command []string, report func(string)) session.Command {
+func sessionCommand(command []string, logger *log.Logger) session.Command {
+	report := func(message string) { logger.Print(message) }
 	return func(ctx context.Context, env []string) error {
 		if len(command) > 0 {
 			return process.Run(ctx, command, env)
