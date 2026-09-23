@@ -46,3 +46,94 @@ func TestInvalidProfilesFailBeforeAWSAccess(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfigurationPrecedence(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	t.Setenv("HOME", filepath.Join(directory, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(directory, "config"))
+	userDirectory, err := os.UserConfigDir()
+	require.NoError(t, err)
+	userPath := filepath.Join(userDirectory, "pg-tunnel", "pg-tunnel.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(userPath), 0o700))
+	require.NoError(t, os.WriteFile(userPath, []byte(valid), 0o600))
+
+	// A shared profile and its relative CA work from different worktrees.
+	for _, worktree := range []string{"first", "second"} {
+		t.Run(worktree, func(t *testing.T) {
+			path := filepath.Join(directory, worktree)
+			require.NoError(t, os.Mkdir(path, 0o700))
+			t.Chdir(path)
+			value, loadErr := profile.Load("", "dev")
+			require.NoError(t, loadErr)
+			assert.Equal(t, filepath.Join(filepath.Dir(userPath), "ca.pem"), value.RootCert)
+		})
+	}
+
+	require.NoError(t, os.WriteFile("pg-tunnel.json", []byte(strings.Replace(valid, `"reader"`, `"project-reader"`, 1)), 0o600))
+	value, err := profile.Load("", "dev")
+	require.NoError(t, err)
+	assert.Equal(t, "project-reader", value.User)
+	assert.Equal(t, filepath.Join(directory, "ca.pem"), value.RootCert)
+
+	explicitPath := filepath.Join(directory, "explicit.json")
+	require.NoError(t, os.WriteFile(explicitPath, []byte(strings.Replace(valid, `"reader"`, `"explicit-reader"`, 1)), 0o600))
+	value, err = profile.Load(explicitPath, "dev")
+	require.NoError(t, err)
+	assert.Equal(t, "explicit-reader", value.User)
+	_, err = profile.Load(filepath.Join(directory, "missing.json"), "dev")
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestLoadDoesNotFallBackFromExistingProjectConfig(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	t.Setenv("HOME", filepath.Join(directory, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(directory, "config"))
+	userDirectory, err := os.UserConfigDir()
+	require.NoError(t, err)
+	userPath := filepath.Join(userDirectory, "pg-tunnel", "pg-tunnel.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(userPath), 0o700))
+	require.NoError(t, os.WriteFile(userPath, []byte(valid), 0o600))
+
+	for name, content := range map[string]string{
+		"malformed":       "{",
+		"missing profile": `{"profiles":{}}`,
+		"invalid profile": strings.Replace(valid, `"reader"`, `""`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, os.WriteFile("pg-tunnel.json", []byte(content), 0o600))
+			_, loadErr := profile.Load("", "dev")
+			require.ErrorContains(t, loadErr, "pg-tunnel.json")
+		})
+	}
+	require.NoError(t, os.Remove("pg-tunnel.json"))
+	require.NoError(t, os.Symlink("missing.json", "pg-tunnel.json"))
+	_, err = profile.Load("", "dev")
+	require.ErrorIs(t, err, os.ErrNotExist, "a broken project symlink must not select the shared profile")
+}
+
+func TestLoadMissingConfigurationReportsLocations(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	userDirectory, err := os.UserConfigDir()
+	require.NoError(t, err)
+	_, err = profile.Load("", "dev")
+	require.ErrorContains(t, err, "pg-tunnel.json in the current directory")
+	require.ErrorContains(t, err, filepath.Join(userDirectory, "pg-tunnel", "pg-tunnel.json"))
+	require.ErrorContains(t, err, "--config PATH")
+}
+
+func TestProjectAndExplicitConfigDoNotRequireHome(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	_, err := profile.Load("", "dev")
+	require.ErrorContains(t, err, "find user configuration directory")
+	require.NoError(t, os.WriteFile("pg-tunnel.json", []byte(valid), 0o600))
+	_, err = profile.Load("", "dev")
+	require.NoError(t, err)
+	_, err = profile.Load("pg-tunnel.json", "dev")
+	require.NoError(t, err)
+}

@@ -1,8 +1,19 @@
 # Configuration and usage
 
-Profiles are loaded from `pg-tunnel.json` in the current directory. Use an
-explicit file with `pg-tunnel run --config /path/to/profiles.json NAME -- COMMAND`.
-Certificate paths are relative to the profile file.
+Both `run` and `connect` select one configuration file, in this order:
+
+1. The explicit `--config PATH`, if supplied before the profile name.
+2. `pg-tunnel.json` in the current directory.
+3. The shared user configuration:
+   - macOS: `~/Library/Application Support/pg-tunnel/pg-tunnel.json`
+   - Linux: `$XDG_CONFIG_HOME/pg-tunnel/pg-tunnel.json`, or
+     `~/.config/pg-tunnel/pg-tunnel.json` when `XDG_CONFIG_HOME` is unset or empty.
+
+Use the user configuration to share profiles across worktrees without repeating
+`--config`. Files are not merged: an invalid or unreadable selected file, or a
+missing profile within it, is an error. An explicit missing file never falls back
+to another location. Certificate paths are relative to the selected file, so move
+its CA bundle too if the profile uses a relative `sslrootcert` path.
 
 | Setting | Meaning |
 | --- | --- |

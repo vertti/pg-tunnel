@@ -67,3 +67,15 @@ type failingWriter struct {
 func (writer failingWriter) Write([]byte) (int, error) {
 	return 0, writer.err
 }
+
+func TestEmptyExplicitConfigIsRejected(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"run", "connect"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			var output bytes.Buffer
+			err := cli.Run([]string{mode, "--config=", "dev"}, &output)
+			require.ErrorContains(t, err, "--config requires a non-empty path")
+		})
+	}
+}

@@ -27,7 +27,14 @@ import (
 func runSession(ctx context.Context, mode string, args []string, output io.Writer) error {
 	flags := flag.NewFlagSet(mode, flag.ContinueOnError)
 	flags.SetOutput(output)
-	path := flags.String("config", "pg-tunnel.json", "connection profiles (JSON)")
+	var path string
+	flags.Func("config", "connection profiles (JSON); default: project pg-tunnel.json, then user configuration", func(value string) error {
+		if value == "" {
+			return errors.New("--config requires a non-empty path")
+		}
+		path = value
+		return nil
+	})
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -47,7 +54,7 @@ func runSession(ctx context.Context, mode string, args []string, output io.Write
 	} else if len(command) > 0 {
 		return ErrUsage
 	}
-	p, err := profile.Load(*path, remaining[0])
+	p, err := profile.Load(path, remaining[0])
 	if err != nil {
 		return fmt.Errorf("load connection profile: %w", err)
 	}

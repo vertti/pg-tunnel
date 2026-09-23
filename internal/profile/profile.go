@@ -1,4 +1,4 @@
-// Package profile reads non-secret, project-local connection profiles.
+// Package profile reads non-secret project and user connection profiles.
 package profile
 
 import (
@@ -27,8 +27,37 @@ type Profile struct {
 }
 
 // Load reads one named profile; certificate paths are relative to its file.
+// An empty path searches the current directory, then the user config directory.
 func Load(path, name string) (Profile, error) {
-	file, err := os.Open(path) //nolint:gosec // The path is the configuration file explicitly selected by the user.
+	path, err := configPath(path)
+	if err != nil {
+		return Profile{}, err
+	}
+	return load(path, name)
+}
+
+func configPath(path string) (string, error) {
+	if path != "" {
+		return path, nil
+	}
+	const filename = "pg-tunnel.json"
+	// A broken symlink or unreadable project config must not select another database.
+	if _, err := os.Lstat(filename); !errors.Is(err, os.ErrNotExist) {
+		return filename, nil
+	}
+	directory, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("no project %s; find user configuration directory (or use --config PATH): %w", filename, err)
+	}
+	path = filepath.Join(directory, "pg-tunnel", filename)
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("no configuration file found: checked %s in the current directory and %s; create one or use --config PATH", filename, path)
+	}
+	return path, nil
+}
+
+func load(path, name string) (Profile, error) {
+	file, err := os.Open(path) //nolint:gosec // The path is an explicit configuration file or a documented default location.
 	if err != nil {
 		return Profile{}, fmt.Errorf("open profiles %s: %w", path, err)
 	}
@@ -39,11 +68,11 @@ func Load(path, name string) (Profile, error) {
 	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&config); err != nil {
-		return Profile{}, fmt.Errorf("decode profiles: %w", err)
+		return Profile{}, fmt.Errorf("decode profiles %s: %w", path, err)
 	}
 	var extra any
 	if err = decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return Profile{}, errors.New("profiles must contain exactly one JSON object")
+		return Profile{}, fmt.Errorf("profiles %s must contain exactly one JSON object", path)
 	}
 	value, ok := config.Profiles[name]
 	if !ok {
@@ -53,7 +82,7 @@ func Load(path, name string) (Profile, error) {
 		value.Port = 5432
 	}
 	if err = value.Validate(); err != nil {
-		return Profile{}, fmt.Errorf("profile %q: %w", name, err)
+		return Profile{}, fmt.Errorf("profile %q in %s: %w", name, path, err)
 	}
 	if !filepath.IsAbs(value.RootCert) {
 		value.RootCert = filepath.Join(filepath.Dir(path), value.RootCert)
