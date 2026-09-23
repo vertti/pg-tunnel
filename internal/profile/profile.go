@@ -21,7 +21,7 @@ type Profile struct {
 	JumpTag    string `json:"jump_tag"`
 	Region     string `json:"region"`
 	AWSProfile string `json:"aws_profile"`
-	RootCert   string `json:"sslrootcert"`
+	RootCert   string `json:"sslrootcert,omitempty"`
 	Port       int    `json:"port"`
 	LocalPort  int    `json:"local_port"`
 }
@@ -97,6 +97,9 @@ func load(path, name string) (Profile, error) {
 	if err = value.Validate(); err != nil {
 		return Profile{}, fmt.Errorf("profile %q in %s: %w", name, path, err)
 	}
+	if value.RootCert == "" {
+		return value, nil
+	}
 	if !filepath.IsAbs(value.RootCert) {
 		value.RootCert = filepath.Join(filepath.Dir(path), value.RootCert)
 	}
@@ -115,8 +118,8 @@ func (p *Profile) Validate() error {
 	if (p.Target == "") == (p.JumpTag == "") {
 		return errors.New("set exactly one of target (SSM instance ID) or jump_tag (EC2 Name tag)")
 	}
-	if p.Database == "" || p.User == "" || p.RootCert == "" {
-		return errors.New("database, user, and sslrootcert are required")
+	if p.Database == "" || p.User == "" {
+		return errors.New("database and user are required")
 	}
 	if p.LocalPort < 0 || p.LocalPort > 65535 || p.Port < 1 || p.Port > 65535 {
 		return errors.New("port must be 1–65535; local_port must be 0–65535 (0 selects an available port)")
@@ -125,6 +128,10 @@ func (p *Profile) Validate() error {
 }
 
 func (p *Profile) validateText() error {
+	if p.Host != "" && p.RootCert == "" {
+		return errors.New("sslrootcert is required for an explicit host; RDS instance profiles can use automatic certificates")
+	}
+
 	for _, value := range []string{p.DBInstance, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert} {
 		if strings.ContainsAny(value, "\r\n\x00") || value != strings.TrimSpace(value) {
 			return errors.New("profile values cannot contain line breaks, NULs, or surrounding whitespace")

@@ -23,13 +23,11 @@ mise trust
 mise install
 mise run build
 cp pg-tunnel.example.json pg-tunnel.json
-curl --fail --show-error --location \
-  https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
-  --output global-bundle.pem
 ```
 
 Edit `pg-tunnel.json` with your database, IAM database user, SSM jump host, and
-AWS profile. Authenticate to AWS using your usual workflow, then run:
+AWS profile, or use `./bin/pg-tunnel init --profile YOUR_AWS_PROFILE`. RDS CA
+certificates are managed automatically. Authenticate to AWS, then run:
 
 ```sh
 ./bin/pg-tunnel run development -- psql

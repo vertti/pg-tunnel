@@ -98,11 +98,11 @@ func TestWizardDiscoversAcrossPagesAndSavesOnlyAfterConfirmation(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			var output bytes.Buffer
 			// Invalid selection is retried; database name defaults to the RDS hint.
-			input := fmt.Sprintf("bad\n9\n1\n1\n\nreader\n%s\nreadonly\n", ca)
+			input := "bad\n9\n1\n1\n\nreader\nreadonly\n"
 			if answer != "EOF" {
 				input += answer + "\n"
 			}
-			wizard := setup.Wizard{Config: fixtureConfig(t, ""), Input: strings.NewReader(input), Output: &output, Path: path, AWSProfile: "dev"}
+			wizard := setup.Wizard{Config: fixtureConfig(t, ""), Input: strings.NewReader(input), Output: &output, Path: path, RootCert: ca, AWSProfile: "dev"}
 			err := wizard.Run(t.Context())
 			if answer == "EOF" {
 				require.ErrorContains(t, err, "input ended")
@@ -140,7 +140,7 @@ func TestWizardDiscoveryPermissionFailures(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			var output bytes.Buffer
-			wizard := setup.Wizard{Config: fixtureConfig(t, service), Input: strings.NewReader(fmt.Sprintf("1\n1\ni-manual\ndata\nreader\n%s\nreadonly\nyes\n", ca)), Output: &output, Path: path}
+			wizard := setup.Wizard{Config: fixtureConfig(t, service), Input: strings.NewReader("1\n1\ni-manual\ndata\nreader\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
 			err := wizard.Run(t.Context())
 			if service == "sts" || service == "rds" {
 				require.Error(t, err)
@@ -205,8 +205,8 @@ func TestWizardRejectsUnusableDatabaseAndCA(t *testing.T) {
 				return response, nil
 			})
 			path := filepath.Join(t.TempDir(), "profiles.json")
-			input := fmt.Sprintf("1\n1\ndata\nreader\n%s\n", filepath.Join(t.TempDir(), "missing.pem"))
-			wizard := setup.Wizard{Config: cfg, Input: strings.NewReader(input), Output: io.Discard, Path: path}
+			input := "1\n1\ndata\nreader\n"
+			wizard := setup.Wizard{Config: cfg, Input: strings.NewReader(input), Output: io.Discard, Path: path, RootCert: filepath.Join(t.TempDir(), "missing.pem")}
 			require.ErrorContains(t, wizard.Run(t.Context()), tc.want)
 			assert.NoFileExists(t, path)
 		})

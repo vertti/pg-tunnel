@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 
+	"github.com/vertti/pg-tunnel/internal/awsdb"
 	"github.com/vertti/pg-tunnel/internal/libpq"
 	"github.com/vertti/pg-tunnel/internal/profile"
 	"github.com/vertti/pg-tunnel/internal/session"
@@ -25,6 +27,7 @@ type Wizard struct {
 	Output     io.Writer
 	Config     aws.Config
 	AWSProfile string
+	RootCert   string
 	Path       string
 }
 
@@ -52,9 +55,14 @@ func (w *Wizard) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	p := profile.Profile{DBInstance: aws.ToString(db.DBInstanceIdentifier), Region: w.Config.Region, AWSProfile: w.AWSProfile, Target: target, Port: int(aws.ToInt32(db.Endpoint.Port))}
-	if err := connectionDetails(&ui, &p, db); err != nil {
-		return err
+	p := profile.Profile{DBInstance: aws.ToString(db.DBInstanceIdentifier), Region: w.Config.Region, AWSProfile: w.AWSProfile, Target: target, RootCert: w.RootCert, Port: int(aws.ToInt32(db.Endpoint.Port))}
+	if detailsErr := connectionDetails(&ui, &p, db); detailsErr != nil {
+		return detailsErr
+	}
+	if p.RootCert == "" {
+		if _, err = awsdb.RDSCA(ctx, w.Config.Region, func(message string) { log.New(w.Output, "", 0).Print(message) }); err != nil {
+			return fmt.Errorf("prepare automatic RDS certificates: %w", err)
+		}
 	}
 	return w.save(ctx, &ui, &p)
 }
@@ -143,8 +151,11 @@ func connectionDetails(ui *prompt, p *profile.Profile, db *rdstypes.DBInstance) 
 	if p.User, err = ui.ask("IAM database user (must already exist with rds_iam membership)", ""); err != nil {
 		return err
 	}
-	if p.RootCert, err = ui.ask("Path to your trusted RDS CA PEM bundle", ""); err != nil {
-		return err
+	if p.RootCert == "" {
+		if err = p.Validate(); err != nil {
+			return fmt.Errorf("validate discovered profile: %w", err)
+		}
+		return nil
 	}
 	p.RootCert, err = filepath.Abs(p.RootCert)
 	if err != nil {

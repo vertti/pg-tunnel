@@ -62,9 +62,6 @@ func runSession(ctx context.Context, mode string, args []string, output io.Write
 }
 
 func execute(ctx context.Context, p *profile.Profile, command []string, output io.Writer) error {
-	if _, err := libpq.TLSConfig(session.Target{RootCert: p.RootCert}); err != nil {
-		return fmt.Errorf("validate CA certificate: %w", err)
-	}
 	logger := log.New(output, "pg-tunnel: ", 0)
 	report := func(message string) { logger.Print(message) }
 	setupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -72,6 +69,15 @@ func execute(ctx context.Context, p *profile.Profile, command []string, output i
 	cfg, err := awsConfig(setupCtx, p)
 	if err != nil {
 		return err
+	}
+	if p.RootCert == "" {
+		p.RootCert, err = awsdb.RDSCA(setupCtx, cfg.Region, report)
+		if err != nil {
+			return fmt.Errorf("prepare RDS certificates: %w", err)
+		}
+	}
+	if _, err = libpq.TLSConfig(session.Target{RootCert: p.RootCert}); err != nil {
+		return fmt.Errorf("validate CA certificate: %w", err)
 	}
 	jump, err := awsdb.JumpHost(setupCtx, ec2.NewFromConfig(cfg), p)
 	if err != nil {

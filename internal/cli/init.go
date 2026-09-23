@@ -18,6 +18,7 @@ func initProfile(ctx context.Context, args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
 	flags.SetOutput(output)
 	var p profile.Profile
+	flags.StringVar(&p.RootCert, "sslrootcert", "", "optional custom CA PEM file (default: automatically managed AWS RDS bundle)")
 	flags.StringVar(&p.Region, "region", "", "AWS region (defaults to AWS configuration)")
 	flags.StringVar(&p.AWSProfile, "aws-profile", "", "AWS profile to use and save (defaults to current AWS credentials)")
 	flags.StringVar(&p.AWSProfile, "profile", "", "alias for --aws-profile")
@@ -51,7 +52,7 @@ func initProfile(ctx context.Context, args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	wizard := setup.Wizard{Input: terminalInput{fd: terminal, done: ctx.Done()}, Output: output, Config: cfg, AWSProfile: p.AWSProfile, Path: *path}
+	wizard := setup.Wizard{Input: terminalInput{fd: terminal, done: ctx.Done()}, Output: output, Config: cfg, AWSProfile: p.AWSProfile, RootCert: p.RootCert, Path: *path}
 	if err = wizard.Run(ctx); err != nil {
 		return fmt.Errorf("initialize profile: %w", err)
 	}
