@@ -179,7 +179,7 @@ func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error
 	if err != nil {
 		return fmt.Errorf("format profile preview: %w", err)
 	}
-	if printErr := ui.print("\n%s\n\nDestination: %q\nThis adds a profile; an existing name will not be replaced. Database login has not been tested.\n", data, w.Path); printErr != nil {
+	if printErr := ui.print("\nHere's the configuration we would save:\n\n%s\n\nDestination: %q\nThis adds a profile; an existing name will not be replaced. Database login has not been tested.\n", data, w.Path); printErr != nil {
 		return printErr
 	}
 	answer, err := ui.ask("Save this profile? (yes/no)", "no")
