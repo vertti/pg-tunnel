@@ -1,8 +1,8 @@
 # Installation
 
-Until the first release is published, [build from source](../README.md#setup).
-Release archives will be available on the
-[releases page](https://github.com/vertti/pg-tunnel/releases).
+Download your archive and `checksums.txt` from the
+[latest release](https://github.com/vertti/pg-tunnel/releases/latest), or
+[build from source](../README.md#setup).
 
 | System | Archive |
 | --- | --- |
