@@ -19,6 +19,12 @@ the TLS/IAM readiness check; `internal/process` owns process groups. The small
 `internal/ssmplugin` adapter runs AWS code in an isolated copy of our executable.
 Profiles and CLI wiring remain separate from those providers.
 
+`pg-tunnel --version` reports Go's embedded module version and, for builds from
+Git, the full commit. Tagged builds use the release version; other commits use
+Go's timestamped version, and modified checkouts include `+dirty`. Builds without
+version metadata report `dev`. No custom linker flags are needed. Release builds
+must use a clean checkout with tags available.
+
 See [the footprint measurements](footprint.md) for the initial size budget.
 
 The official SSM source is pinned to commit

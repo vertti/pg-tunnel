@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"runtime/debug"
 )
 
 // ErrUsage indicates an incomplete or unsupported command.
@@ -45,7 +46,7 @@ func rootOptions(args []string, output io.Writer) error {
 		fmt.Fprintln(output, "       pg-tunnel init [--region REGION] [--aws-profile PROFILE] [--config PATH]") //nolint:errcheck // flag.Usage has no error return.
 		flags.PrintDefaults()
 	}
-	version := flags.Bool("version", false, "print the development version")
+	version := flags.Bool("version", false, "print version and build commit")
 
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -59,9 +60,26 @@ func rootOptions(args []string, output io.Writer) error {
 		return ErrUsage
 	}
 
-	if _, err := fmt.Fprintln(output, "pg-tunnel dev"); err != nil {
+	info, _ := debug.ReadBuildInfo()
+	if _, err := fmt.Fprintln(output, buildVersion(info)); err != nil {
 		return fmt.Errorf("write version: %w", err)
 	}
 
 	return nil
+}
+
+func buildVersion(info *debug.BuildInfo) string {
+	version := "dev"
+	if info == nil {
+		return "pg-tunnel " + version
+	}
+	if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		version = info.Main.Version
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" && setting.Value != "" {
+			return "pg-tunnel " + version + " (" + setting.Value + ")"
+		}
+	}
+	return "pg-tunnel " + version
 }

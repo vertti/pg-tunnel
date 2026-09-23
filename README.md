@@ -60,3 +60,6 @@ mise run ci
 ```
 
 [Configuration and usage](docs/usage.md) · [Contributor notes](docs/development.md)
+
+Licensed under [Apache-2.0](LICENSE). Third-party components retain their own
+licenses and notices.
