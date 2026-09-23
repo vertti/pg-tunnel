@@ -84,7 +84,7 @@ func chooseDatabase(ctx context.Context, ui *prompt, cfg *aws.Config) (*rdstypes
 		db := &dbs[i]
 		labels[i] = fmt.Sprintf("%q (status %q, IAM enabled: %t)", aws.ToString(db.DBInstanceIdentifier), aws.ToString(db.DBInstanceStatus), aws.ToBool(db.IAMDatabaseAuthenticationEnabled))
 	}
-	index, err := ui.choose("Database", labels)
+	index, err := ui.choose("Database", labels, len(dbs) == 1)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func chooseTarget(ctx context.Context, ui *prompt, cfg *aws.Config, db *rdstypes
 	if printErr := ui.print("Online SSM hosts; matching VPC is a hint, not a connectivity check.\n"); printErr != nil {
 		return "", printErr
 	}
-	index, err := ui.choose("Jump host", labels)
+	index, err := ui.choose("Jump host", labels, len(hosts) <= 1)
 	if err != nil {
 		return "", err
 	}
@@ -228,8 +228,13 @@ func (p *prompt) print(format string, args ...any) error {
 }
 
 func (p *prompt) ask(label, fallback string) (string, error) {
+	hint := ""
+	if fallback != "" {
+		escaped := strconv.Quote(fallback)
+		hint = " [" + escaped[1:len(escaped)-1] + "]"
+	}
 	for {
-		if err := p.print("%s [%s]: ", label, strconv.Quote(fallback)); err != nil {
+		if err := p.print("%s%s: ", label, hint); err != nil {
 			return "", err
 		}
 		if !p.input.Scan() {
@@ -251,14 +256,18 @@ func (p *prompt) ask(label, fallback string) (string, error) {
 	}
 }
 
-func (p *prompt) choose(label string, choices []string) (int, error) {
+func (p *prompt) choose(label string, choices []string, defaultFirst bool) (int, error) {
+	fallback := ""
+	if defaultFirst {
+		fallback = "1"
+	}
 	for i, choice := range choices {
 		if err := p.print("  %d. %s\n", i+1, choice); err != nil {
 			return 0, err
 		}
 	}
 	for {
-		answer, err := p.ask(label+" number", "")
+		answer, err := p.ask(label+" number", fallback)
 		if err != nil {
 			return 0, err
 		}

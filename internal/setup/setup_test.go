@@ -276,3 +276,46 @@ func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
 		})
 	}
 }
+
+func TestWizardDefaultsToUniqueResources(t *testing.T) {
+	t.Parallel()
+	ca := certificate(t)
+	for _, tc := range []struct {
+		name, input, target, prompt string
+		singleHost                  bool
+	}{
+		{"one host", "\n\n\n\nreader\nreadonly\nyes\n", "i-chosen", "Jump host number [1]:", true},
+		{"multiple hosts", "\n\n2\n\n\nreader\nreadonly\nyes\n", "i-other", "Jump host number:", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := fixtureConfig(t, "")
+			client := cfg.HTTPClient
+			cfg.HTTPClient = httpFunc(func(request *http.Request) (*http.Response, error) {
+				if tc.singleHost && request.Header.Get("X-Amz-Target") == "AmazonSSM.DescribeInstanceInformation" {
+					require.NoError(t, request.Body.Close())
+					return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"InstanceInformationList":[{"InstanceId":"i-chosen","PingStatus":"Online"}]}`)), Request: request}, nil
+				}
+				response, err := client.Do(request)
+				if err != nil {
+					return nil, fmt.Errorf("fixture response: %w", err)
+				}
+				return response, nil
+			})
+
+			var output bytes.Buffer
+			path := filepath.Join(t.TempDir(), "profiles.json")
+			wizard := setup.Wizard{Verify: successfulVerification, Config: cfg, Input: strings.NewReader(tc.input), Output: &output, Path: path, RootCert: ca}
+			require.NoError(t, wizard.Run(t.Context()))
+			saved, err := profile.Load(path, "readonly")
+			require.NoError(t, err)
+			assert.Equal(t, tc.target, saved.Target)
+			assert.Contains(t, output.String(), "Database number [1]:")
+			assert.NotContains(t, output.String(), `[""]`)
+			assert.Contains(t, output.String(), tc.prompt)
+			assert.Contains(t, output.String(), "IAM database user (must already exist with rds_iam membership): ")
+			assert.Contains(t, output.String(), "A value is required.")
+			assert.Equal(t, "reader", saved.User)
+		})
+	}
+}
