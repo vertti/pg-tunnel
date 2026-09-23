@@ -86,6 +86,9 @@ func TestInitHelpRequiresNeitherTerminalNorAWS(t *testing.T) {
 	require.NoError(t, cli.Run([]string{"init", "--help"}, &output))
 	assert.Contains(t, output.String(), "-region")
 	assert.Contains(t, output.String(), "-aws-profile")
+	assert.Contains(t, output.String(), "\n  -profile string\n")
 	assert.Contains(t, output.String(), "-config")
-	require.ErrorIs(t, cli.Run([]string{"init", "unexpected"}, &output), cli.ErrUsage)
+	for _, option := range []string{"--profile", "--aws-profile"} {
+		require.ErrorIs(t, cli.Run([]string{"init", option, "dev", "unexpected"}, &output), cli.ErrUsage)
+	}
 }

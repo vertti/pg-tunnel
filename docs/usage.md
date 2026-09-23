@@ -17,13 +17,19 @@ its CA bundle too if the profile uses a relative `sslrootcert` path.
 
 ## Interactive setup
 
-After authenticating to AWS, run:
+AWS Vault is optional. Use your normal AWS credentials or select a named AWS
+profile directly (`--profile` and `--aws-profile` are aliases):
 
 ```sh
 pg-tunnel init --region eu-central-1
-# Or select an AWS profile and a project-local destination:
-pg-tunnel init --aws-profile dev --region eu-central-1 --config pg-tunnel.json
+# Or use a named AWS profile (region comes from it when configured):
+pg-tunnel init --profile dev
 ```
+
+For an SSO profile, log in first with `aws sso login --profile dev`. The selected
+AWS profile is saved in the connection profile, so subsequent `run` and `connect`
+commands reuse it. Profiles whose credentials exist only in AWS Vault's keychain
+still need AWS Vault to supply them. Add `--config pg-tunnel.json` to save locally.
 
 The wizard shows the account, lists RDS PostgreSQL instances in that region, and
 suggests running EC2 hosts that are online in SSM. Hosts in the database's VPC

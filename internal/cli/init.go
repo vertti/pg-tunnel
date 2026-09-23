@@ -19,7 +19,8 @@ func initProfile(ctx context.Context, args []string, output io.Writer) error {
 	flags.SetOutput(output)
 	var p profile.Profile
 	flags.StringVar(&p.Region, "region", "", "AWS region (defaults to AWS configuration)")
-	flags.StringVar(&p.AWSProfile, "aws-profile", "", "AWS profile (defaults to the current AWS credentials)")
+	flags.StringVar(&p.AWSProfile, "aws-profile", "", "AWS profile to use and save (defaults to current AWS credentials)")
+	flags.StringVar(&p.AWSProfile, "profile", "", "alias for --aws-profile")
 	path := flags.String("config", "", "destination JSON file (defaults to shared user configuration)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
