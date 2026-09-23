@@ -2,6 +2,8 @@
 go = "1.27.1"
 golangci-lint = "2.13.2"
 actionlint = "1.7.12"
+goreleaser = "2.18.2"
+"go:github.com/google/go-licenses/v2" = "2.0.1"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.8.0"
 
 [env]
@@ -17,6 +19,7 @@ run = [
   "golangci-lint config verify",
   "golangci-lint run",
   "actionlint",
+  "goreleaser check",
   "go mod tidy -diff",
   "go mod verify",
 ]
@@ -36,3 +39,14 @@ run = "govulncheck ./..."
 [tasks.ci]
 description = "Run the same quality, test, and build checks as GitHub Actions"
 run = ["mise run lint", "mise run test", "mise run build", "mise run vuln"]
+
+[tasks.licenses]
+description = "Collect runtime dependency notices for release archives"
+run = [
+  "go-licenses save ./cmd/pg-tunnel --save_path=licenses --force",
+  'mkdir -p licenses/Go && cp "$(go env GOROOT)/LICENSE" licenses/Go/LICENSE',
+]
+
+[tasks.package]
+description = "Build local release archives without publishing"
+run = "goreleaser release --snapshot --clean"
