@@ -21,7 +21,7 @@ type Profile struct {
 	JumpTag    string `json:"jump_tag"`
 	Region     string `json:"region"`
 	AWSProfile string `json:"aws_profile"`
-	RootCert   string `json:"sslrootcert"`
+	RootCert   string `json:"sslrootcert,omitempty"`
 	Port       int    `json:"port"`
 	LocalPort  int    `json:"local_port"`
 }
@@ -45,34 +45,47 @@ func configPath(path string) (string, error) {
 	if _, err := os.Lstat(filename); !errors.Is(err, os.ErrNotExist) {
 		return filename, nil
 	}
-	directory, err := os.UserConfigDir()
+	path, err := UserPath()
 	if err != nil {
 		return "", fmt.Errorf("no project %s; find user configuration directory (or use --config PATH): %w", filename, err)
 	}
-	path = filepath.Join(directory, "pg-tunnel", filename)
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("no configuration file found: checked %s in the current directory and %s; create one or use --config PATH", filename, path)
 	}
 	return path, nil
 }
 
-func load(path, name string) (Profile, error) {
+type configuration struct {
+	Profiles map[string]Profile `json:"profiles"`
+}
+
+func readConfig(path string) (configuration, error) {
 	file, err := os.Open(path) //nolint:gosec // The path is an explicit configuration file or a documented default location.
 	if err != nil {
-		return Profile{}, fmt.Errorf("open profiles %s: %w", path, err)
+		return configuration{}, fmt.Errorf("open profiles %s: %w", path, err)
 	}
 	defer file.Close() //nolint:errcheck // This file is read-only.
-	var config struct {
-		Profiles map[string]Profile `json:"profiles"`
-	}
-	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
+	var config configuration
+	limited := &io.LimitedReader{R: file, N: (1 << 20) + 1}
+	decoder := json.NewDecoder(limited)
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&config); err != nil {
-		return Profile{}, fmt.Errorf("decode profiles %s: %w", path, err)
+		return configuration{}, fmt.Errorf("decode profiles %s: %w", path, err)
 	}
 	var extra any
 	if err = decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return Profile{}, fmt.Errorf("profiles %s must contain exactly one JSON object", path)
+		return configuration{}, fmt.Errorf("profiles %s must contain exactly one JSON object", path)
+	}
+	if limited.N == 0 {
+		return configuration{}, errors.New("configuration exceeds the 1 MiB size limit")
+	}
+	return config, nil
+}
+
+func load(path, name string) (Profile, error) {
+	config, err := readConfig(path)
+	if err != nil {
+		return Profile{}, err
 	}
 	value, ok := config.Profiles[name]
 	if !ok {
@@ -83,6 +96,9 @@ func load(path, name string) (Profile, error) {
 	}
 	if err = value.Validate(); err != nil {
 		return Profile{}, fmt.Errorf("profile %q in %s: %w", name, path, err)
+	}
+	if value.RootCert == "" {
+		return value, nil
 	}
 	if !filepath.IsAbs(value.RootCert) {
 		value.RootCert = filepath.Join(filepath.Dir(path), value.RootCert)
@@ -102,8 +118,8 @@ func (p *Profile) Validate() error {
 	if (p.Target == "") == (p.JumpTag == "") {
 		return errors.New("set exactly one of target (SSM instance ID) or jump_tag (EC2 Name tag)")
 	}
-	if p.Database == "" || p.User == "" || p.RootCert == "" {
-		return errors.New("database, user, and sslrootcert are required")
+	if p.Database == "" || p.User == "" {
+		return errors.New("database and user are required")
 	}
 	if p.LocalPort < 0 || p.LocalPort > 65535 || p.Port < 1 || p.Port > 65535 {
 		return errors.New("port must be 1–65535; local_port must be 0–65535 (0 selects an available port)")
@@ -112,6 +128,10 @@ func (p *Profile) Validate() error {
 }
 
 func (p *Profile) validateText() error {
+	if p.Host != "" && p.RootCert == "" {
+		return errors.New("sslrootcert is required for an explicit host; RDS instance profiles can use automatic certificates")
+	}
+
 	for _, value := range []string{p.DBInstance, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert} {
 		if strings.ContainsAny(value, "\r\n\x00") || value != strings.TrimSpace(value) {
 			return errors.New("profile values cannot contain line breaks, NULs, or surrounding whitespace")

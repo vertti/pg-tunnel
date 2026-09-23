@@ -137,3 +137,17 @@ func TestProjectAndExplicitConfigDoNotRequireHome(t *testing.T) {
 	_, err = profile.Load("pg-tunnel.json", "dev")
 	require.NoError(t, err)
 }
+
+func TestAutomaticCAIsOnlyAvailableForRDSInstances(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	content := strings.Replace(valid, `,"sslrootcert":"ca.pem"`, "", 1)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	value, err := profile.Load(path, "dev")
+	require.NoError(t, err)
+	assert.Empty(t, value.RootCert, "an automatic CA must not resolve to the configuration directory")
+	content = strings.Replace(content, `"db_instance":"example"`, `"host":"db.example"`, 1)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	_, err = profile.Load(path, "dev")
+	require.ErrorContains(t, err, "sslrootcert is required for an explicit host")
+}

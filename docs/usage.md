@@ -15,6 +15,41 @@ missing profile within it, is an error. An explicit missing file never falls bac
 to another location. Certificate paths are relative to the selected file, so move
 its CA bundle too if the profile uses a relative `sslrootcert` path.
 
+## Interactive setup
+
+AWS Vault is optional. Use your normal AWS credentials or select a named AWS
+profile directly (`--profile` and `--aws-profile` are aliases):
+
+```sh
+pg-tunnel init --region eu-central-1
+# Or use a named AWS profile (region comes from it when configured):
+pg-tunnel init --profile dev
+```
+
+For an SSO profile, log in first with `aws sso login --profile dev`. The selected
+AWS profile is saved in the connection profile, so subsequent `run` and `connect`
+commands reuse it. Profiles whose credentials exist only in AWS Vault's keychain
+still need AWS Vault to supply them. Add `--config pg-tunnel.json` to save locally.
+
+The wizard shows the account, lists RDS PostgreSQL instances in that region, and
+suggests running EC2 hosts that are online in SSM. Hosts in the database's VPC
+appear first. Enter an existing IAM database user and database name, then review
+the profile. After you confirm, the wizard opens a temporary tunnel, verifies TLS
+and database authentication, and cleans up the session before saving. It sends no
+SQL queries. A failed test, cancellation, or cleanup error leaves the configuration
+unchanged. RDS CA certificates are managed automatically. Profiles are added to
+the shared user config by default; an existing name is never replaced.
+Use `--config` for the project file if one would shadow your shared configuration.
+
+Discovery needs `rds:DescribeDBInstances`, `ec2:DescribeInstances`, and
+`ssm:DescribeInstanceInformation`. It also calls STS `GetCallerIdentity` to show
+the account. If jump-host discovery is unavailable, you can enter the SSM target
+manually. Verification also needs the connection permissions listed below.
+RDS-linked master-user secret ARNs are shown as metadata only: the
+wizard does not read secret values, infer database users from secret names, or
+configure password authentication. This initial setup supports RDS PostgreSQL
+with IAM authentication.
+
 | Setting | Meaning |
 | --- | --- |
 | `db_instance` | Discover an RDS PostgreSQL instance's endpoint and port. |
@@ -25,7 +60,20 @@ its CA bundle too if the profile uses a relative `sslrootcert` path.
 | `jump_tag` | Alternative EC2 `Name` tag; must match exactly one running instance. |
 | `region`, `aws_profile` | Optional overrides for the standard AWS SDK configuration. |
 | `local_port` | Optional local port; default `0` selects an available port. |
-| `sslrootcert` | Required PEM trust bundle for full database certificate verification. |
+| `sslrootcert` | Optional custom PEM trust bundle for RDS instances; required for an explicit `host`. |
+
+When `sslrootcert` is omitted, `init`, `run`, and `connect` download the official
+[AWS RDS CA bundle](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html)
+over verified HTTPS and cache it under the OS user cache directory in
+`pg-tunnel/certificates`. Commercial, GovCloud, and China bundles are kept separate.
+The bundle is checked for updates after 30 days when a command starts. A failed
+refresh keeps a usable cached bundle and prints a warning; a missing, invalid, or
+expired bundle must be downloaded successfully. Database connections always use
+`verify-full`, including hostname and certificate-expiry checks.
+
+Use `init --sslrootcert /path/to/ca.pem` or set `sslrootcert` in a profile to manage
+trust yourself. Custom files are never refreshed or replaced. Remove an existing
+RDS profile's `sslrootcert` setting to opt into automatic management.
 
 The SSM node must reach the database and support
 `AWS-StartPortForwardingSessionToRemoteHost`. Your identity needs
