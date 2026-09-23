@@ -1,0 +1,35 @@
+version: 2
+project_name: pg-tunnel
+before:
+  hooks:
+    - mise run licenses
+builds:
+  - main: ./cmd/pg-tunnel
+    binary: pg-tunnel
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath, -buildvcs=true]
+    ldflags: [-s -w]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    builds_info:
+      owner: root
+      group: root
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: LICENSE
+        info: &file_info
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+          mode: 0644
+      - src: licenses
+        info: *file_info
+      - src: third_party/session-manager-plugin/*
+        info: *file_info
+checksum:
+  name_template: checksums.txt
+report_sizes: true

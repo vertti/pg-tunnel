@@ -14,7 +14,8 @@ pg-tunnel run development -- uv run jupyter lab
 
 ## Setup
 
-Build from source with [mise](https://mise.jdx.dev/getting-started.html):
+See [binary installation](docs/install.md) for release packages, or build from
+source with [mise](https://mise.jdx.dev/getting-started.html):
 
 ```sh
 git clone https://github.com/vertti/pg-tunnel.git

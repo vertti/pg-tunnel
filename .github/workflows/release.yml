@@ -1,0 +1,118 @@
+name: Release packages
+
+on:
+  pull_request:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          version: "2026.9.1"
+      - name: Check tagged release source
+        if: github.ref_type == 'tag'
+        run: |
+          git merge-base --is-ancestor HEAD origin/main
+          mise run ci
+      - name: Package
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then
+            mise x -- goreleaser release --clean --skip=publish
+          else
+            mise run package
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: packages
+          path: |
+            dist/*.tar.gz
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  smoke:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux_amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux_arm64
+          - runner: macos-15-intel
+            platform: darwin_amd64
+          - runner: macos-15
+            platform: darwin_arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: packages
+      - name: Verify and run archive
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          shasum -a 256 -c checksums.txt
+          tar -xzf "pg-tunnel_${PLATFORM}.tar.gz"
+          test -f LICENSE
+          test -f licenses/Go/LICENSE
+          test -f licenses/github.com/aws/aws-sdk-go-v2/NOTICE.txt
+          test -f licenses/github.com/jackc/pgx/v5/LICENSE
+          test -f third_party/session-manager-plugin/NOTICE
+          test "$(wc -c < pg-tunnel)" -lt 26214400
+          ./pg-tunnel --version 2>&1 | grep -F "$EXPECTED_COMMIT"
+          ./pg-tunnel --help
+          ./pg-tunnel init --help
+          printf '%s binary bytes: %s\n' "$PLATFORM" "$(wc -c < pg-tunnel)"
+          printf '%s archive bytes: %s\n' "$PLATFORM" "$(wc -c < "pg-tunnel_${PLATFORM}.tar.gz")"
+
+  verify:
+    name: Release packages
+    if: always()
+    needs: [package, smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - env:
+          PACKAGE_RESULT: ${{ needs.package.result }}
+          SMOKE_RESULT: ${{ needs.smoke.result }}
+        run: test "$PACKAGE_RESULT" = success && test "$SMOKE_RESULT" = success
+
+  draft:
+    if: github.ref_type == 'tag'
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: packages
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes ./*.tar.gz checksums.txt

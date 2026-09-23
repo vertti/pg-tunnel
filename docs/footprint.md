@@ -39,3 +39,19 @@ gzip -c bin/pg-tunnel | wc -c
 ```
 
 Build flags: `go build -trimpath -ldflags="-s -w"`.
+
+## Release packages
+
+Measured on 2026-09-23 with the pinned GoReleaser toolchain, cross-compiled from
+macOS arm64 with CGO disabled. Archives include dependency licenses and notices.
+
+| Target | Binary MiB | Archive MiB |
+| --- | ---: | ---: |
+| macOS arm64 | 11.61 | 4.48 |
+| macOS amd64 | 12.60 | 4.86 |
+| Linux arm64 | 11.31 | 4.30 |
+| Linux amd64 | 12.32 | 4.77 |
+
+`mise run package` reports exact sizes for each build. Two consecutive local
+builds produced identical archive SHA-256 checksums. The release workflow checks
+the 25 MiB executable limit and runs each archive on its native platform.

@@ -6,12 +6,14 @@ mise run test   # Testify, race detector, shuffled order, coverage.out
 mise run fmt    # gofumpt and goimports
 mise run lint   # strict analysis, formatting, workflows, module consistency
 mise run vuln   # reachable dependency vulnerabilities; requires network
+mise run package # four local archives + checksums; never publishes
 mise run ci     # the same complete checks as GitHub Actions
 ```
 
 Tests use `stretchr/testify`, with all `testifylint` checks enabled. Suppressions
-must name the rule and explain their scope. CI runs one Linux job on pull
-requests and pushes to `main`.
+must name the rule and explain their scope. The main CI job runs on Linux. A separate
+release workflow builds all four archives on pull requests and smoke-tests them
+on native macOS/Linux amd64/arm64 runners.
 
 The core interfaces live in `internal/session`. AWS discovery/authentication and
 SSM transport live in `internal/awsdb`; `internal/libpq` owns credential files and
@@ -41,3 +43,35 @@ when upgrading it. Upstream's built-in version is `1.3.0.0` for feature negotiat
 the pinned commit identifies the actual source revision. Preserve the
 [upstream license and notices](../third_party/session-manager-plugin/) in release
 packages alongside the binary.
+
+## Releases
+
+Release tools are pinned in mise; they are not runtime dependencies. Run
+`mise run package` to build local snapshots in `dist/`. Archives contain the
+binary, project license, runtime dependency licenses/notices, Go's license, and
+AWS's upstream notices. `checksums.txt` uses SHA-256. License discovery inspects
+the command's imports, not just direct entries in `go.mod`.
+
+Builds disable CGO, strip symbols and local paths, and use the Git commit time
+for archive timestamps. Use the same Go/tool versions, source commit and tags
+when comparing checksums. The release checks enforce the 25 MiB binary budget.
+Platform smoke tests verify checksums, notices, version/commit, and CLI startup;
+they do not log into AWS. Signing/notarization is not yet configured.
+
+After merging a release commit to main and choosing a version:
+
+```sh
+git switch main
+git pull --ff-only
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The tag workflow verifies the commit belongs to main, reruns quality checks,
+builds packages and smoke-tests each platform, then creates a **draft** GitHub
+release. Review its assets and notes before publishing. Failed checks produce
+no draft. A manual workflow run on a branch produces CI artifacts only.
+
+Dependabot checks Go modules and GitHub Actions weekly, grouping minor/patch
+updates per ecosystem. Security alerts and security-fix PRs are enabled on GitHub.
+Mise tool pins are maintained separately.

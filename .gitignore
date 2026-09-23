@@ -6,6 +6,8 @@
 
 # Build and test output
 /bin/
+/dist/
+/licenses/
 /coverage.out
 
 # Local connection profiles and downloaded AWS trust roots
