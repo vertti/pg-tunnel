@@ -10,7 +10,7 @@ import (
 )
 
 // ErrUsage indicates an incomplete or unsupported command.
-var ErrUsage = errors.New("use pg-tunnel run [--config pg-tunnel.json] PROFILE -- COMMAND, connect PROFILE, or cleanup")
+var ErrUsage = errors.New("use pg-tunnel run [--config pg-tunnel.json] PROFILE -- COMMAND, connect PROFILE, init, or cleanup")
 
 // Run parses command-line options and writes help or version information.
 func Run(args []string, output io.Writer) error {
@@ -23,6 +23,8 @@ func RunContext(ctx context.Context, args []string, output io.Writer) error {
 		switch args[0] {
 		case "run", "connect":
 			return runSession(ctx, args[0], args[1:], output)
+		case "init":
+			return initProfile(ctx, args[1:], output)
 		case "cleanup":
 			if len(args) != 1 {
 				return ErrUsage
@@ -30,12 +32,17 @@ func RunContext(ctx context.Context, args []string, output io.Writer) error {
 			return cleanup()
 		}
 	}
+	return rootOptions(args, output)
+}
+
+func rootOptions(args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("pg-tunnel", flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: pg-tunnel run [--config pg-tunnel.json] PROFILE -- COMMAND") //nolint:errcheck // flag.Usage has no error return; normal command output errors are returned separately.
-		fmt.Fprintln(output, "       pg-tunnel connect [--config pg-tunnel.json] PROFILE")        //nolint:errcheck // flag.Usage has no error return.
-		fmt.Fprintln(output, "       pg-tunnel cleanup")                                          //nolint:errcheck // flag.Usage has no error return.
+		fmt.Fprintln(output, "Usage: pg-tunnel run [--config pg-tunnel.json] PROFILE -- COMMAND")               //nolint:errcheck // flag.Usage has no error return; normal command output errors are returned separately.
+		fmt.Fprintln(output, "       pg-tunnel connect [--config pg-tunnel.json] PROFILE")                      //nolint:errcheck // flag.Usage has no error return.
+		fmt.Fprintln(output, "       pg-tunnel cleanup")                                                        //nolint:errcheck // flag.Usage has no error return.
+		fmt.Fprintln(output, "       pg-tunnel init [--region REGION] [--aws-profile PROFILE] [--config PATH]") //nolint:errcheck // flag.Usage has no error return.
 		flags.PrintDefaults()
 	}
 	version := flags.Bool("version", false, "print the development version")

@@ -79,3 +79,13 @@ func TestEmptyExplicitConfigIsRejected(t *testing.T) {
 		})
 	}
 }
+
+func TestInitHelpRequiresNeitherTerminalNorAWS(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	require.NoError(t, cli.Run([]string{"init", "--help"}, &output))
+	assert.Contains(t, output.String(), "-region")
+	assert.Contains(t, output.String(), "-aws-profile")
+	assert.Contains(t, output.String(), "-config")
+	require.ErrorIs(t, cli.Run([]string{"init", "unexpected"}, &output), cli.ErrUsage)
+}

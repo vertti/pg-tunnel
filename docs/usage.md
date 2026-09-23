@@ -15,6 +15,33 @@ missing profile within it, is an error. An explicit missing file never falls bac
 to another location. Certificate paths are relative to the selected file, so move
 its CA bundle too if the profile uses a relative `sslrootcert` path.
 
+## Interactive setup
+
+After authenticating to AWS, run:
+
+```sh
+pg-tunnel init --region eu-central-1
+# Or select an AWS profile and a project-local destination:
+pg-tunnel init --aws-profile dev --region eu-central-1 --config pg-tunnel.json
+```
+
+The wizard shows the account, lists RDS PostgreSQL instances in that region, and
+suggests running EC2 hosts that are online in SSM. Hosts in the database's VPC
+appear first; network access and database login are verified when you connect.
+Enter an existing IAM database user, database name, and trusted CA PEM path, then
+review the profile before saving. It adds to the shared user config by default,
+refuses to replace an existing profile name, and never changes AWS resources.
+Use `--config` for the project file if one would shadow your shared configuration.
+
+Discovery needs `rds:DescribeDBInstances`, `ec2:DescribeInstances`, and
+`ssm:DescribeInstanceInformation`. It also calls STS `GetCallerIdentity` to show
+the account. If jump-host discovery is unavailable, you can enter the SSM target
+manually. RDS-linked master-user secret ARNs are shown as metadata only: the
+wizard does not read secret values, infer database users from secret names, or
+configure password authentication. This initial setup supports RDS PostgreSQL
+with IAM authentication; CA bundle downloading and broader secret discovery
+remain separate work.
+
 | Setting | Meaning |
 | --- | --- |
 | `db_instance` | Discover an RDS PostgreSQL instance's endpoint and port. |

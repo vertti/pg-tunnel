@@ -45,34 +45,47 @@ func configPath(path string) (string, error) {
 	if _, err := os.Lstat(filename); !errors.Is(err, os.ErrNotExist) {
 		return filename, nil
 	}
-	directory, err := os.UserConfigDir()
+	path, err := UserPath()
 	if err != nil {
 		return "", fmt.Errorf("no project %s; find user configuration directory (or use --config PATH): %w", filename, err)
 	}
-	path = filepath.Join(directory, "pg-tunnel", filename)
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("no configuration file found: checked %s in the current directory and %s; create one or use --config PATH", filename, path)
 	}
 	return path, nil
 }
 
-func load(path, name string) (Profile, error) {
+type configuration struct {
+	Profiles map[string]Profile `json:"profiles"`
+}
+
+func readConfig(path string) (configuration, error) {
 	file, err := os.Open(path) //nolint:gosec // The path is an explicit configuration file or a documented default location.
 	if err != nil {
-		return Profile{}, fmt.Errorf("open profiles %s: %w", path, err)
+		return configuration{}, fmt.Errorf("open profiles %s: %w", path, err)
 	}
 	defer file.Close() //nolint:errcheck // This file is read-only.
-	var config struct {
-		Profiles map[string]Profile `json:"profiles"`
-	}
-	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
+	var config configuration
+	limited := &io.LimitedReader{R: file, N: (1 << 20) + 1}
+	decoder := json.NewDecoder(limited)
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&config); err != nil {
-		return Profile{}, fmt.Errorf("decode profiles %s: %w", path, err)
+		return configuration{}, fmt.Errorf("decode profiles %s: %w", path, err)
 	}
 	var extra any
 	if err = decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return Profile{}, fmt.Errorf("profiles %s must contain exactly one JSON object", path)
+		return configuration{}, fmt.Errorf("profiles %s must contain exactly one JSON object", path)
+	}
+	if limited.N == 0 {
+		return configuration{}, errors.New("configuration exceeds the 1 MiB size limit")
+	}
+	return config, nil
+}
+
+func load(path, name string) (Profile, error) {
+	config, err := readConfig(path)
+	if err != nil {
+		return Profile{}, err
 	}
 	value, ok := config.Profiles[name]
 	if !ok {
