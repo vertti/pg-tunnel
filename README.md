@@ -1,8 +1,10 @@
+<img src="docs/assets/pg-tunnel-logo.png" alt="pg-tunnel logo" width="240">
+
 # pg-tunnel
 
-Run PostgreSQL clients against private databases with managed tunnels and IAM
-credentials. The first backend supports AWS RDS PostgreSQL through an SSM jump
-host on macOS and Linux.
+Connect PostgreSQL clients to private AWS RDS databases through SSM, with
+automatically refreshed IAM credentials. Runs on macOS and Linux as a single
+executable, with no separate SSM plugin to install.
 
 ```sh
 pg-tunnel run development -- psql
@@ -10,17 +12,13 @@ pg-tunnel run development -- python analysis.py
 pg-tunnel run development -- uv run jupyter lab
 ```
 
-This is an early implementation. Automated tests exercise local TLS/database
-handshakes, subprocesses, token renewal, and cleanup. Live AWS testing on macOS
-has verified IAM read-only access through SSM with psql and concurrent Python
-connections. A delayed remote termination after Ctrl-C remains under investigation;
-see [the acceptance notes](docs/live-acceptance.md) for scope.
-
 ## Setup
 
-Install [mise](https://mise.jdx.dev/getting-started.html), then:
+Build from source with [mise](https://mise.jdx.dev/getting-started.html):
 
 ```sh
+git clone https://github.com/vertti/pg-tunnel.git
+cd pg-tunnel
 mise trust
 mise install
 mise run build
@@ -30,68 +28,20 @@ curl --fail --show-error --location \
   --output global-bundle.pem
 ```
 
-Edit `pg-tunnel.json` with your database, database user, jump host, AWS region,
-and AWS profile. Both the local profile and downloaded CA bundle are gitignored.
-The example contains no real infrastructure identifiers or credentials.
+Edit `pg-tunnel.json` with your database, IAM database user, SSM jump host, and
+AWS profile. Authenticate to AWS using your usual workflow, then run:
 
 ```sh
-mise exec -- ./bin/pg-tunnel run development -- psql
+./bin/pg-tunnel run development -- psql
 ```
 
-Mise pins the Go toolchain and development checks. The runtime is a single
-`pg-tunnel` executable: AWS's official Session Manager forwarding code is compiled
-in, so there is no separate plugin to install. Go, mise, the linters, and the AWS
-CLI are not runtime requirements. AWS CLI or AWS Vault may still be useful for
-your organization's login workflow.
+The database must have IAM authentication enabled, and the SSM jump host must
+reach it. See [configuration and AWS permissions](docs/usage.md) for details.
 
-## Connection profiles
+## Python and notebooks
 
-Profiles are loaded from `pg-tunnel.json` in the current directory. Use an
-explicit file with `pg-tunnel run --config /path/to/profiles.json NAME -- COMMAND`.
-Certificate paths are relative to the profile file.
-
-| Setting | Meaning |
-| --- | --- |
-| `db_instance` | Discover an RDS PostgreSQL instance's endpoint and port. |
-| `host` | Alternative explicit database endpoint; mutually exclusive with `db_instance`. |
-| `port` | Remote port for an explicit host, default `5432`. |
-| `database`, `user` | PostgreSQL database and IAM-enabled database user. |
-| `target` | Explicit SSM managed instance ID. |
-| `jump_tag` | Alternative EC2 `Name` tag; must match exactly one running instance. |
-| `region`, `aws_profile` | Optional overrides for the standard AWS SDK configuration. |
-| `local_port` | Optional local port; default `0` selects an available port. |
-| `sslrootcert` | Required PEM trust bundle for full database certificate verification. |
-
-The SSM node must reach the database and support
-`AWS-StartPortForwardingSessionToRemoteHost`. Your identity needs
-`ssm:StartSession`, `ssm:TerminateSession`, and `rds-db:connect`. Discovery also
-needs `rds:DescribeDBInstances` and, when using a jump tag,
-`ec2:DescribeInstances`. The database must enable IAM authentication and grant
-`rds_iam` to the selected database user. The user's SQL permissions are defined
-in PostgreSQL; the utility does not grant read or write access.
-
-For AWS Vault, omit `aws_profile` from the connection profile and use a renewable
-credential source:
-
-```sh
-aws-vault exec --server YOUR_PROFILE -- \
-  mise exec -- ./bin/pg-tunnel run development -- psql
-```
-
-Static temporary credentials in environment variables cannot refresh themselves.
-The utility reports AWS credential expiry when available and recognizes
-`AWS_CREDENTIAL_EXPIRATION` for environment credentials. SSO sessions can also
-require a fresh login after their underlying login session expires.
-
-## Client behavior
-
-`run` verifies TLS and IAM database authentication before starting the command.
-It supplies `PGSERVICE`, `PGSERVICEFILE`, and `PGPASSFILE` pointing to private
-per-session files, replacing inherited `PG*` settings. Command output is left on
-stdout; tunnel diagnostics go to stderr. The real database hostname remains the
-TLS identity, while `hostaddr=127.0.0.1` routes libpq through the local tunnel.
-
-A notebook launched through the utility can use a libpq-based driver directly:
+Launch your script or Jupyter through `pg-tunnel`. Psycopg picks up the connection
+settings automatically:
 
 ```python
 import psycopg
@@ -99,83 +49,16 @@ import psycopg
 conn = psycopg.connect("")
 ```
 
-Already running notebook servers do not inherit these settings. Drivers that do
-not use libpq, applications with explicit connection strings, and clients that
-cache passwords may need their own integration. `DATABASE_URL` is not rewritten.
-
-For a separately launched client:
-
-```sh
-pg-tunnel connect development
-```
-
-This keeps the session alive and prints the three environment settings. Supply
-those values to the other client or configure its service/password file paths.
-GUI support depends on the client's libpq/service-file capabilities.
-
-## Renewal and cleanup
-
-IAM tokens are refreshed three minutes before their reported expiry. Transient
-failures retry after five seconds, with bounded exponential backoff up to one
-minute. A failed replacement leaves the last password file intact. Token expiry
-affects new logins, not established database connections. A running process's
-password environment variable cannot be updated, so the utility uses file lookup.
-
-Each session owns a mode-0700 directory and mode-0600 credential files. Password
-updates use atomic replacement. The shared `~/.pgpass` is never modified.
-Shutdown joins the refresh worker, stops the child process group, deletes private
-credentials, and attempts both local and remote tunnel cleanup. Child exit codes
-are preserved. SIGINT and SIGTERM are forwarded; processes that fail to exit are
-killed after a grace period.
-
-After an uncatchable termination or machine crash, a new session automatically
-removes abandoned credential directories. Active sessions are protected by
-process-held directory locks. Recovery can also be run explicitly:
-
-```sh
-pg-tunnel cleanup
-```
-
-SIGKILL cannot trigger immediate cleanup. Orphaned child processes or SSM sessions
-may need separate termination; recovery removes credential files, not remote
-sessions. AWS session limits provide an additional backstop. This first version
-supports IAM only; Secrets Manager passwords, SSH/VPN transports, Windows, and
-additional client adapters are later work.
+`pg-tunnel` manages private connection files and removes them on shutdown.
+Your shared `~/.pgpass` stays untouched. See the
+[client guide](docs/usage.md#client-behavior) for existing notebook servers and
+separately launched clients.
 
 ## Development
 
 ```sh
-mise run build  # stripped binary: bin/pg-tunnel
-mise run test   # Testify, race detector, shuffled order, coverage.out
-mise run fmt    # gofumpt and goimports
-mise run lint   # strict analysis, formatting, workflows, module consistency
-mise run vuln   # reachable dependency vulnerabilities; requires network
-mise run ci     # the same complete checks as GitHub Actions
+mise run fmt
+mise run ci
 ```
 
-Tests use `stretchr/testify`, with all `testifylint` checks enabled. Suppressions
-must name the rule and explain their scope. CI runs one Linux job on pull
-requests and pushes to `main`.
-
-The core interfaces live in `internal/session`. AWS discovery/authentication and
-SSM transport live in `internal/awsdb`; `internal/libpq` owns credential files and
-the TLS/IAM readiness check; `internal/process` owns process groups. The small
-`internal/ssmplugin` adapter runs AWS code in an isolated copy of our executable.
-Profiles and CLI wiring remain separate from those providers.
-
-See [the footprint measurements](docs/footprint.md) for the initial size budget.
-
-The official SSM source is pinned to commit
-[`930a08e65d3a`](https://github.com/aws/session-manager-plugin/commit/930a08e65d3a378eeeebb7f1bcf67eae7d860ae0).
-Its port handler registers in an internal `__ssm` child mode, before our usual
-signal setup. AWS's signal handlers and `os.Exit` calls therefore cannot bypass
-the supervisor's credential cleanup. Session tokens go through the child
-environment, not command arguments. We maintain the adapter, not the SSM protocol.
-
-Upstream is an executable-oriented project without a root `go.mod`; keep its
-revision and dependencies pinned, including the historical `twinj/uuid` version.
-Run the local WebSocket cancellation test and live remote-host forwarding checks
-when upgrading it. Upstream's built-in version is `1.3.0.0` for feature negotiation;
-the pinned commit identifies the actual source revision. Preserve the
-[upstream license and notices](third_party/session-manager-plugin/) in release
-packages alongside the binary.
+[Configuration and usage](docs/usage.md) · [Contributor notes](docs/development.md)
