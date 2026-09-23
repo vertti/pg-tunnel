@@ -6,39 +6,59 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"io"
-	"net"
+	"net/url"
 	"os"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgproto3"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/vertti/pg-tunnel/internal/session"
 )
 
-// Verify performs the RDS IAM authentication handshake over verified TLS.
-// It reads no ambient libpq settings and sends no SQL queries.
+// Verify authenticates through the tunnel over verified TLS, without issuing SQL.
 func Verify(ctx context.Context, target session.Target, port int, credential session.Credential) error {
-	config, err := TLSConfig(target)
+	tlsConfig, err := TLSConfig(target)
 	if err != nil {
 		return err
 	}
+	config, err := verificationConfig(target, port, credential)
+	if err != nil {
+		return err
+	}
+	config.TLSConfig = tlsConfig
 	verifyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(verifyCtx, "tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
-	if err != nil {
-		return fmt.Errorf("dial local tunnel: %w", err)
+	conn, err := pgconn.ConnectConfig(verifyCtx, config)
+	if err == nil {
+		err = conn.Close(verifyCtx)
 	}
-	defer conn.Close()                                                //nolint:errcheck // The verification connection has finished; close cannot invalidate the authentication result.
-	stop := context.AfterFunc(verifyCtx, func() { _ = conn.Close() }) //nolint:errcheck // Closing the socket is how cancellation interrupts a blocked protocol read.
-	defer stop()
-	if err = authenticate(verifyCtx, conn, config, target, credential); err != nil {
-		return fmt.Errorf("TLS/database connection failed (check CA, rds-db:connect, and database user rds_iam membership): %s", strings.ReplaceAll(err.Error(), credential.Secret, "[redacted]"))
+	if err != nil {
+		hint := "check CA, secret username/password, and database password authentication; RDS users with rds_iam must use IAM"
+		if !credential.ExpiresAt.IsZero() {
+			hint = "check CA, rds-db:connect, and database user rds_iam membership"
+		}
+		return fmt.Errorf("TLS/database connection failed (%s): %s", hint, strings.ReplaceAll(err.Error(), credential.Secret, "[redacted]"))
 	}
 	return nil
+}
+
+func verificationConfig(target session.Target, port int, credential session.Credential) (*pgconn.Config, error) {
+	config, err := isolatedConfig()
+	if err != nil {
+		return nil, fmt.Errorf("prepare database verification: %w", err)
+	}
+	config.Host, config.Port = target.Host, uint16(port) //nolint:gosec // The port comes from a bound TCP listener.
+	config.User, config.Database, config.Password = target.User, target.Database, credential.Secret
+	config.RuntimeParams = map[string]string{"application_name": "pg-tunnel-verification"}
+	config.Fallbacks = nil
+	config.MaxProtocolMessageBodyLen = 1 << 20
+	config.LookupFunc = func(context.Context, string) ([]string, error) { return []string{"127.0.0.1"}, nil }
+	if !credential.ExpiresAt.IsZero() {
+		config.RequireAuth = "password"
+	}
+	return config, nil
 }
 
 // TLSConfig loads the configured trust roots before any AWS session is opened.
@@ -54,68 +74,26 @@ func TLSConfig(target session.Target) (*tls.Config, error) {
 	return &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, ServerName: target.Host}, nil
 }
 
-func authenticate(ctx context.Context, raw net.Conn, config *tls.Config, target session.Target, credential session.Credential) error {
-	request := pgproto3.NewFrontend(raw, raw)
-	request.Send(&pgproto3.SSLRequest{})
-	if err := request.Flush(); err != nil {
-		return fmt.Errorf("request TLS: %w", err)
+// pgconn always honors PGSERVICE, even when an empty service is passed. Supply our
+// own empty, non-secret service file instead of mutating process environment.
+func isolatedConfig() (config *pgconn.Config, result error) {
+	dir, err := os.MkdirTemp("", "pg-tunnel-verification-")
+	if err != nil {
+		return nil, fmt.Errorf("create isolated verification settings: %w", err)
 	}
-	var reply [1]byte
-	if _, err := io.ReadFull(raw, reply[:]); err != nil {
-		return fmt.Errorf("read TLS response: %w", err)
+	defer func() { result = errors.Join(result, os.RemoveAll(dir)) }()
+	if writeErr := atomicWrite(dir, "service", "[pg-tunnel]\n"); writeErr != nil {
+		return nil, writeErr
 	}
-	if reply[0] != 'S' {
-		return errors.New("database refused TLS; plaintext fallback is disabled")
+	// A dummy password suppresses .pgpass reads. TLS is configured after parsing,
+	// with certificate paths explicitly cleared to suppress ambient file reads.
+	connection := "postgres://pg-tunnel:unused@127.0.0.1:5432/pg-tunnel?service=pg-tunnel&servicefile=" + url.QueryEscape(filepath.Join(dir, "service")) +
+		"&sslmode=disable&sslrootcert=&sslcert=&sslkey=&sslpassword=&sslsni=1&sslnegotiation=postgres" +
+		"&connect_timeout=10&target_session_attrs=any&min_protocol_version=3.0&max_protocol_version=3.0" +
+		"&channel_binding=prefer&require_auth=password,md5,scram-sha-256"
+	config, err = pgconn.ParseConfig(connection)
+	if err != nil {
+		return nil, fmt.Errorf("parse isolated verification settings: %w", err)
 	}
-	secure := tls.Client(raw, config)
-	if err := secure.HandshakeContext(ctx); err != nil {
-		return fmt.Errorf("verify TLS certificate: %w", err)
-	}
-	frontend := pgproto3.NewFrontend(secure, secure)
-	frontend.SetMaxBodyLen(1 << 20)
-	frontend.Send(&pgproto3.StartupMessage{ProtocolVersion: pgproto3.ProtocolVersionNumber, Parameters: map[string]string{
-		"user": target.User, "database": target.Database, "application_name": "pg-tunnel-verification",
-	}})
-	if err := frontend.Flush(); err != nil {
-		return fmt.Errorf("send database startup: %w", err)
-	}
-	return completeAuthentication(frontend, credential.Secret)
-}
-
-func completeAuthentication(frontend *pgproto3.Frontend, secret string) error {
-	challenged, authenticated := false, false
-	for {
-		message, err := frontend.Receive()
-		if err != nil {
-			return fmt.Errorf("read authentication response: %w", err)
-		}
-		switch response := message.(type) {
-		case *pgproto3.AuthenticationCleartextPassword:
-			challenged = true
-			frontend.Send(&pgproto3.PasswordMessage{Password: secret})
-			if err = frontend.Flush(); err != nil {
-				return fmt.Errorf("send IAM token over TLS: %w", err)
-			}
-		case *pgproto3.AuthenticationOk:
-			authenticated = challenged
-		case *pgproto3.ReadyForQuery:
-			return finishVerification(frontend, authenticated)
-		case *pgproto3.ErrorResponse:
-			return fmt.Errorf("database rejected login (SQLSTATE %s): %s", response.Code, response.Message)
-		case *pgproto3.ParameterStatus, *pgproto3.BackendKeyData, *pgproto3.NoticeResponse:
-		default:
-			return errors.New("database requested an unsupported authentication exchange; this backend requires RDS IAM authentication")
-		}
-	}
-}
-
-func finishVerification(frontend *pgproto3.Frontend, authenticated bool) error {
-	if !authenticated {
-		return errors.New("database did not authenticate the IAM token")
-	}
-	frontend.Send(&pgproto3.Terminate{})
-	if err := frontend.Flush(); err != nil {
-		return fmt.Errorf("end verification connection: %w", err)
-	}
-	return nil
+	return config, nil
 }

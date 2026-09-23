@@ -21,7 +21,7 @@ import (
 	"github.com/vertti/pg-tunnel/internal/session"
 )
 
-// Wizard discovers metadata using the caller's AWS credentials. It never reads secret values.
+// Wizard discovers metadata and only reads credentials through Verify after confirmation.
 type Wizard struct {
 	Verify     func(context.Context, *profile.Profile) error
 	Input      io.Reader
@@ -60,6 +60,9 @@ func (w *Wizard) Run(ctx context.Context) error {
 		return err
 	}
 	p := profile.Profile{DBInstance: aws.ToString(db.DBInstanceIdentifier), Region: w.Config.Region, AWSProfile: w.AWSProfile, Target: target, RootCert: w.RootCert, Port: int(aws.ToInt32(db.Endpoint.Port))}
+	if authErr := authenticationDetails(&ui, &p, db); authErr != nil {
+		return authErr
+	}
 	if detailsErr := connectionDetails(&ui, &p, db); detailsErr != nil {
 		return detailsErr
 	}
@@ -97,9 +100,6 @@ func chooseDatabase(ctx context.Context, ui *prompt, cfg *aws.Config) (*rdstypes
 }
 
 func describeDatabase(ui *prompt, db *rdstypes.DBInstance) error {
-	if !aws.ToBool(db.IAMDatabaseAuthenticationEnabled) {
-		return errors.New("selected database has IAM authentication disabled; pg-tunnel currently requires IAM database authentication")
-	}
 	if db.Endpoint == nil || aws.ToString(db.Endpoint.Address) == "" {
 		return errors.New("selected database has no endpoint yet; wait until RDS has made it available")
 	}
@@ -107,7 +107,7 @@ func describeDatabase(ui *prompt, db *rdstypes.DBInstance) error {
 		return printErr
 	}
 	if db.MasterUserSecret != nil {
-		if printErr := ui.print("RDS-linked master-user secret: %q (metadata only; password authentication is not yet supported).\n", aws.ToString(db.MasterUserSecret.SecretArn)); printErr != nil {
+		if printErr := ui.print("RDS-linked master-user secret: %q (metadata only; selecting password authentication can use this secret).\n", aws.ToString(db.MasterUserSecret.SecretArn)); printErr != nil {
 			return printErr
 		}
 	}
@@ -147,12 +147,34 @@ func chooseTarget(ctx context.Context, ui *prompt, cfg *aws.Config, db *rdstypes
 	return aws.ToString(hosts[index].InstanceId), nil
 }
 
+func authenticationDetails(ui *prompt, p *profile.Profile, db *rdstypes.DBInstance) error {
+	choices := []string{"Secrets Manager password"}
+	iam := aws.ToBool(db.IAMDatabaseAuthenticationEnabled)
+	if iam {
+		choices = append([]string{"IAM token"}, choices...)
+	}
+	choice, err := ui.choose("Authentication", choices, true)
+	if err != nil {
+		return err
+	}
+	if iam && choice == 0 {
+		return nil
+	}
+	p.Auth = profile.AuthSecretsManager
+	var suggestion string
+	if db.MasterUserSecret != nil {
+		suggestion = aws.ToString(db.MasterUserSecret.SecretArn)
+	}
+	p.SecretID, err = ui.ask("Secret name or ARN (RDS suggestion is the master-user secret)", suggestion)
+	return err
+}
+
 func connectionDetails(ui *prompt, p *profile.Profile, db *rdstypes.DBInstance) error {
 	var err error
 	if p.Database, err = ui.ask("Database name (AWS does not list databases inside the instance)", aws.ToString(db.DBName)); err != nil {
 		return err
 	}
-	if p.User, err = ui.ask("IAM database user (must already exist with rds_iam membership)", ""); err != nil {
+	if p.User, err = databaseUser(ui, p, db); err != nil {
 		return err
 	}
 	if p.RootCert == "" {
@@ -172,6 +194,17 @@ func connectionDetails(ui *prompt, p *profile.Profile, db *rdstypes.DBInstance) 
 		return fmt.Errorf("validate discovered profile: %w", err)
 	}
 	return nil
+}
+
+func databaseUser(ui *prompt, p *profile.Profile, db *rdstypes.DBInstance) (string, error) {
+	userPrompt, defaultUser := "IAM database user (must already exist with rds_iam membership)", ""
+	if p.Auth == profile.AuthSecretsManager {
+		userPrompt = "Database user (must match the secret username)"
+		if db.MasterUserSecret != nil && p.SecretID == aws.ToString(db.MasterUserSecret.SecretArn) {
+			defaultUser = aws.ToString(db.MasterUsername)
+		}
+	}
+	return ui.ask(userPrompt, defaultUser)
 }
 
 func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error {

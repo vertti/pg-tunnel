@@ -11,8 +11,13 @@ import (
 	"strings"
 )
 
-// Profile configures an AWS IAM database session without storing credentials.
+// AuthSecretsManager selects password authentication from an explicitly chosen secret.
+const AuthSecretsManager = "secrets-manager"
+
+// Profile configures a database session without storing credentials.
 type Profile struct {
+	Auth       string `json:"auth,omitempty"`
+	SecretID   string `json:"secret_id,omitempty"`
 	DBInstance string `json:"db_instance"`
 	Host       string `json:"host"`
 	Database   string `json:"database"`
@@ -124,6 +129,9 @@ func (p *Profile) Validate() error {
 	if p.LocalPort < 0 || p.LocalPort > 65535 || p.Port < 1 || p.Port > 65535 {
 		return errors.New("port must be 1–65535; local_port must be 0–65535 (0 selects an available port)")
 	}
+	if err := p.validateAuth(); err != nil {
+		return err
+	}
 	return p.validateText()
 }
 
@@ -132,13 +140,29 @@ func (p *Profile) validateText() error {
 		return errors.New("sslrootcert is required for an explicit host; RDS instance profiles can use automatic certificates")
 	}
 
-	for _, value := range []string{p.DBInstance, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert} {
+	for _, value := range []string{p.DBInstance, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert, p.SecretID} {
 		if strings.ContainsAny(value, "\r\n\x00") || value != strings.TrimSpace(value) {
 			return errors.New("profile values cannot contain line breaks, NULs, or surrounding whitespace")
 		}
 	}
 	if strings.ContainsAny(p.Host, "/:, \\*") || strings.ContainsAny(p.Database, "*") || strings.ContainsAny(p.User, "*") {
 		return errors.New("host must be a single DNS name; database and user cannot contain password-file wildcards")
+	}
+	return nil
+}
+
+func (p *Profile) validateAuth() error {
+	switch p.Auth {
+	case "", "iam":
+		if p.SecretID != "" {
+			return errors.New("secret_id requires auth=secrets-manager; IAM is the default")
+		}
+	case AuthSecretsManager:
+		if p.SecretID == "" {
+			return errors.New("auth=secrets-manager requires secret_id (secret name or full ARN)")
+		}
+	default:
+		return errors.New("auth must be iam or secrets-manager")
 	}
 	return nil
 }

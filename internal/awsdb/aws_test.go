@@ -224,3 +224,18 @@ func TestRemoteCleanupConfirmsFailedTermination(t *testing.T) {
 		})
 	}
 }
+
+func TestPasswordAuthenticationDoesNotRequireRDSIAM(t *testing.T) {
+	t.Parallel()
+	api := rdsFunc(func(context.Context, *rds.DescribeDBInstancesInput) (*rds.DescribeDBInstancesOutput, error) {
+		return &rds.DescribeDBInstancesOutput{DBInstances: []rdstypes.DBInstance{{Engine: aws.String("postgres"), IAMDatabaseAuthenticationEnabled: aws.Bool(false), Endpoint: &rdstypes.Endpoint{Address: aws.String("db.example"), Port: aws.Int32(5432)}}}}, nil
+	})
+	p := profile.Profile{DBInstance: "example", Database: "data", User: "reader"}
+	resolver := awsdb.Resolver{API: api, Profile: &p}
+	_, err := resolver.Resolve(t.Context())
+	require.ErrorContains(t, err, "IAM")
+	p.Auth, p.SecretID = profile.AuthSecretsManager, "chosen-secret"
+	target, err := resolver.Resolve(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "db.example", target.Host)
+}

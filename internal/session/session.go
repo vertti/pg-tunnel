@@ -18,6 +18,7 @@ type Target struct {
 }
 
 // Credential is a renewable database authentication secret.
+// Zero ExpiresAt denotes a password without a known expiry.
 type Credential struct {
 	ExpiresAt time.Time
 	Secret    string
@@ -127,7 +128,7 @@ func (r *Runner) runCommand(ctx context.Context, target Target, tunnel Tunnel, c
 	refreshDone := make(chan struct{})
 	go func() {
 		defer close(refreshDone)
-		r.refresh(runCtx, target, client, credential)
+		r.refresh(runCtx, target, tunnel.Port(), client, credential)
 	}()
 	defer func() { cancel(nil); <-refreshDone }()
 
@@ -150,7 +151,7 @@ func tunnelError(err error) error {
 	return err
 }
 
-func (r *Runner) refresh(ctx context.Context, target Target, client Client, current Credential) {
+func (r *Runner) refresh(ctx context.Context, target Target, port int, client Client, current Credential) {
 	delay := renewalDelay(current)
 	backoff := 5 * time.Second
 	for {
@@ -161,14 +162,14 @@ func (r *Runner) refresh(ctx context.Context, target Target, client Client, curr
 			return
 		case <-timer.C:
 		}
-		next, err := r.renew(ctx, target, client)
+		next, err := r.renew(ctx, target, port, client, current)
 		if ctx.Err() != nil {
 			return
 		}
 		if err != nil {
 			delay = backoff
 			backoff = min(backoff*2, time.Minute)
-			r.report(fmt.Sprintf("Credential refresh failed: %v. Last published token expires %s; retry in %s. Existing connections are not closed by token expiry.", err, current.ExpiresAt.Format(time.RFC3339), delay))
+			r.report(fmt.Sprintf("Credential refresh failed: %v. %s Retry in %s.", err, credentialValidity(current), delay))
 			continue
 		}
 		current = next
@@ -178,20 +179,29 @@ func (r *Runner) refresh(ctx context.Context, target Target, client Client, curr
 	}
 }
 
-func (r *Runner) renew(ctx context.Context, target Target, client Client) (Credential, error) {
+func (r *Runner) renew(ctx context.Context, target Target, port int, client Client, current Credential) (Credential, error) {
 	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	credential, err := r.Auth.Credential(refreshCtx, target)
 	if err != nil {
-		return Credential{}, fmt.Errorf("obtain replacement token: %w", err)
+		return Credential{}, fmt.Errorf("obtain replacement credential: %w", err)
+	}
+	if credential.ExpiresAt.IsZero() && current.ExpiresAt.IsZero() && credential.Secret == current.Secret {
+		return credential, nil
+	}
+	if err = r.Verify(refreshCtx, target, port, credential); err != nil {
+		return Credential{}, fmt.Errorf("verify replacement credential; previous credential retained: %w", err)
 	}
 	if err = client.Update(credential); err != nil {
-		return Credential{}, fmt.Errorf("publish replacement token: %w", err)
+		return Credential{}, fmt.Errorf("publish replacement credential: %w", err)
 	}
 	return credential, nil
 }
 
 func renewalDelay(credential Credential) time.Duration {
+	if credential.ExpiresAt.IsZero() {
+		return 5 * time.Minute
+	}
 	return max(time.Until(credential.ExpiresAt.Add(-3*time.Minute)), time.Second)
 }
 
@@ -202,5 +212,16 @@ func (r *Runner) report(message string) {
 }
 
 func (r *Runner) reportExpiry(credential Credential) {
+	if credential.ExpiresAt.IsZero() {
+		r.report("Secrets Manager password loaded; expiry is not reported. Checking for rotation every 5m0s. New connections may fail between rotation and refresh.")
+		return
+	}
 	r.report(fmt.Sprintf("IAM token expires %s; refresh in %s. Token expiry does not close established connections.", credential.ExpiresAt.Format(time.RFC3339), renewalDelay(credential).Round(time.Second)))
+}
+
+func credentialValidity(credential Credential) string {
+	if credential.ExpiresAt.IsZero() {
+		return "The previous password is still published; it may no longer be valid after rotation."
+	}
+	return "Last published token expires " + credential.ExpiresAt.Format(time.RFC3339) + "; expiry does not close established connections."
 }

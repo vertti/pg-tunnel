@@ -175,7 +175,7 @@ func TestRefreshRetriesAndJoinsBeforeCleanup(t *testing.T) {
 		mu.Lock()
 		assert.Equal(t, 2, calls)
 		assert.Empty(t, published)
-		assert.Contains(t, strings.Join(messages, "\n"), "retry in 5s")
+		assert.Contains(t, strings.Join(messages, "\n"), "Retry in 5s")
 		mu.Unlock()
 		time.Sleep(5 * time.Second)
 		synctest.Wait()
@@ -282,4 +282,68 @@ func TestOneShotVerificationWaitsForCleanup(t *testing.T) {
 			assert.Equal(t, []string{"client closed", "tunnel closed"}, *events)
 		})
 	}
+}
+
+func TestPasswordRotationVerifiesBeforePublishingAndRetainsPreviousOnFailure(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		runner, _, client, events := fixture()
+		var mu sync.Mutex
+		calls, verifications := 0, 0
+		var published []string
+		var messages []string
+		runner.Report = func(message string) { mu.Lock(); defer mu.Unlock(); messages = append(messages, message) }
+		runner.Auth = authFunc(func(context.Context, session.Target) (session.Credential, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			calls++
+			value := "original"
+			if calls >= 3 {
+				value = "rotated"
+			}
+			return session.Credential{Secret: value}, nil
+		})
+		runner.Verify = func(context.Context, session.Target, int, session.Credential) error {
+			mu.Lock()
+			defer mu.Unlock()
+			verifications++
+			if verifications == 2 {
+				return errors.New("database has not accepted the rotation")
+			}
+			return nil
+		}
+		client.onUpdate = func(c session.Credential) error {
+			mu.Lock()
+			defer mu.Unlock()
+			published = append(published, c.Secret)
+			return nil
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		runner.Command = func(ctx context.Context, _ []string) error { <-ctx.Done(); return nil }
+		result := make(chan error, 1)
+		go func() { result <- runner.Run(ctx) }()
+		synctest.Wait()
+		time.Sleep(5 * time.Minute)
+		synctest.Wait()
+		mu.Lock()
+		assert.Equal(t, 2, calls)
+		assert.Equal(t, 1, verifications, "unchanged passwords do not need another database login")
+		mu.Unlock()
+		time.Sleep(5 * time.Minute)
+		synctest.Wait()
+		mu.Lock()
+		assert.Empty(t, published, "a rejected replacement must never reach the password file")
+		assert.Contains(t, strings.Join(messages, "\n"), "previous password is still published")
+		assert.NotContains(t, strings.Join(messages, "\n"), "0001-")
+		mu.Unlock()
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+		mu.Lock()
+		assert.Equal(t, []string{"rotated"}, published)
+		mu.Unlock()
+		cancel()
+		require.NoError(t, <-result)
+		assert.Equal(t, []string{"client closed", "tunnel closed"}, *events)
+	})
 }

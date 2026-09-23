@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
 	"github.com/vertti/pg-tunnel/internal/awsdb"
@@ -87,14 +88,14 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, l
 	if err != nil {
 		return err
 	}
-	envExpiry, err := environmentExpiry()
+	authentication, err := databaseAuth(p, &cfg, report)
 	if err != nil {
 		return err
 	}
 	runner := session.Runner{
 		Resolver:  &awsdb.Resolver{API: rds.NewFromConfig(cfg), Profile: p},
 		Transport: &awsdb.SSM{API: ssm.NewFromConfig(cfg), Region: cfg.Region, Profile: p.AWSProfile, Target: jump, LocalPort: p.LocalPort},
-		Auth:      awsdb.IAM{Provider: cfg.Credentials, Region: cfg.Region, EnvironmentExpiry: envExpiry, Report: report},
+		Auth:      authentication,
 		Clients:   libpq.Files{Root: root}, Verify: libpq.Verify, Env: os.Environ(), Report: report,
 		Command: command,
 	}
@@ -168,4 +169,15 @@ func cleanup() error {
 		return fmt.Errorf("recover abandoned credentials: %w", err)
 	}
 	return nil
+}
+
+func databaseAuth(p *profile.Profile, cfg *aws.Config, report func(string)) (session.Auth, error) {
+	if p.Auth == profile.AuthSecretsManager {
+		return awsdb.Secrets{API: secretsmanager.NewFromConfig(*cfg), ID: p.SecretID}, nil
+	}
+	expiry, err := environmentExpiry()
+	if err != nil {
+		return nil, err
+	}
+	return awsdb.IAM{Provider: cfg.Credentials, Region: cfg.Region, EnvironmentExpiry: expiry, Report: report}, nil
 }

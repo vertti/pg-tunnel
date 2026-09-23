@@ -151,3 +151,27 @@ func TestAutomaticCAIsOnlyAvailableForRDSInstances(t *testing.T) {
 	_, err = profile.Load(path, "dev")
 	require.ErrorContains(t, err, "sslrootcert is required for an explicit host")
 }
+
+func TestExplicitAuthenticationConfiguration(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ auth, secret, want string }{
+		{"", "", ""},
+		{"iam", "", ""},
+		{"secrets-manager", "chosen", ""},
+		{"", "chosen", "secret_id requires"},
+		{"iam", "chosen", "secret_id requires"},
+		{"secrets-manager", "", "requires secret_id"},
+		{"unknown", "", "auth must"},
+	} {
+		t.Run(tc.auth+"/"+tc.secret, func(t *testing.T) {
+			t.Parallel()
+			p := profile.Profile{DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432, Auth: tc.auth, SecretID: tc.secret}
+			err := p.Validate()
+			if tc.want != "" {
+				require.ErrorContains(t, err, tc.want)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
