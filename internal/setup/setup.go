@@ -171,7 +171,7 @@ func connectionDetails(ui *prompt, p *profile.Profile, db *rdstypes.DBInstance) 
 }
 
 func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error {
-	name, err := ui.ask("Profile name", p.DBInstance)
+	name, err := ui.ask("pg-tunnel connection name (used with run/connect)", p.DBInstance)
 	if err != nil {
 		return err
 	}
