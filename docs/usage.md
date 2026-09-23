@@ -53,6 +53,13 @@ import psycopg
 conn = psycopg.connect("")
 ```
 
+Notebooks in the same local JupyterLab server share one tunnel. Launching each
+Lab server through a separate `pg-tunnel run`, for example one per worktree,
+creates separate tunnels and private credential files. Leave `local_port` unset
+or `0` to choose available ports automatically; reusing a fixed port causes a
+conflict. Closing or restarting a notebook leaves its server's tunnel running;
+shutting down the Lab server closes it.
+
 Already running notebook servers do not inherit these settings. Drivers that do
 not use libpq, applications with explicit connection strings, and clients that
 cache passwords may need their own integration. `DATABASE_URL` is not rewritten.
@@ -95,4 +102,3 @@ may need separate termination; recovery removes credential files, not remote
 sessions. AWS session limits provide an additional backstop. This first version
 supports IAM only; Secrets Manager passwords, SSH/VPN transports, Windows, and
 additional client adapters are later work.
-
