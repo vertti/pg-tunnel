@@ -35,8 +35,7 @@ The wizard shows the account, lists RDS PostgreSQL instances in that region, and
 suggests running EC2 hosts that are online in SSM. Hosts in the database's VPC
 appear first. Choose IAM or Secrets Manager authentication, enter an existing
 database user and database name, then review the profile. After you confirm, the
-wizard opens a temporary tunnel, verifies TLS and database authentication, and cleans up the session before saving. It sends no
-SQL queries. A failed test, cancellation, or cleanup error leaves the configuration
+wizard opens a temporary tunnel, verifies TLS and database authentication, and cleans up the session before saving. It also reads PostgreSQL role metadata to warn about privileged access. A failed test, cancellation, or cleanup error leaves the configuration
 unchanged. RDS CA certificates are managed automatically. Profiles are added to
 the shared user config by default; an existing name is never replaced.
 Use `--config` for the project file if one would shadow your shared configuration.
@@ -56,6 +55,7 @@ other secrets require an explicit database user.
 | `host` | Alternative explicit database endpoint; mutually exclusive with `db_instance`. |
 | `port` | Remote port for an explicit host, default `5432`. |
 | `database`, `user` | PostgreSQL database and existing database user. |
+| `environment` | Optional `development`, `staging`, or `production`; production prints a startup warning. |
 | `auth` | `iam` (default) or `secrets-manager`; never falls back between modes. |
 | `secret_id` | Secret name or full ARN; required only for `auth: "secrets-manager"`. |
 | `target` | Explicit SSM managed instance ID. |
@@ -120,6 +120,20 @@ secret identifier; passwords are never copied into it.
 
 A user with `rds_iam` membership must use IAM authentication: on RDS PostgreSQL,
 [IAM takes precedence over password authentication](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html).
+
+## Connection warnings
+
+`init` asks for the environment; choose **Production** to print a prominent
+warning whenever the connection starts. For existing profiles, set
+`"environment": "production"`. Unspecified environments are not classified.
+
+At startup, a read-only PostgreSQL catalog query checks the logged-in user's
+`SUPERUSER`, `CREATEROLE`, `CREATEDB`, and `BYPASSRLS` attributes and membership in
+`rds_superuser`. Privileged access prints a warning before your command starts.
+If catalog inspection is unavailable, pg-tunnel reports that privileges are
+unknown and lets the verified connection proceed. These are reminders, not access
+controls; absence of a warning does not mean a user cannot modify data.
+Warnings go to stderr and do not prompt or repeat during credential refresh.
 
 ## Client behavior
 

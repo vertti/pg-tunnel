@@ -68,7 +68,7 @@ func fixture() (session.Runner, *fakeTunnel, *fakeClient, *[]string) {
 			return session.Credential{Secret: "secret", ExpiresAt: time.Now().Add(15 * time.Minute)}, nil
 		}),
 		Clients: clientsFunc(func(session.Target, int, session.Credential) (session.Client, error) { return client, nil }),
-		Verify:  func(context.Context, session.Target, int, session.Credential) error { return nil },
+		Verify:  func(context.Context, session.Target, int, session.Credential, func(string)) error { return nil },
 		Command: func(context.Context, []string) error { return nil },
 	}
 	return runner, tunnel, client, &events
@@ -107,7 +107,7 @@ func injectFailure(r *session.Runner, stage string, failure error) {
 			return session.Credential{}, failure
 		})
 	case "verify":
-		r.Verify = func(context.Context, session.Target, int, session.Credential) error { return failure }
+		r.Verify = func(context.Context, session.Target, int, session.Credential, func(string)) error { return failure }
 	case "client":
 		r.Clients = clientsFunc(func(session.Target, int, session.Credential) (session.Client, error) { return nil, failure })
 	case "command":
@@ -249,7 +249,7 @@ func TestInterruptedStartupClosesTunnel(t *testing.T) {
 	runner, _, _, events := fixture()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	runner.Verify = func(ctx context.Context, _ session.Target, _ int, _ session.Credential) error {
+	runner.Verify = func(ctx context.Context, _ session.Target, _ int, _ session.Credential, _ func(string)) error {
 		cancel()
 		return ctx.Err()
 	}
@@ -264,7 +264,10 @@ func TestOneShotVerificationWaitsForCleanup(t *testing.T) {
 			t.Parallel()
 			runner, tunnel, _, events := fixture()
 			authenticated := false
-			runner.Verify = func(context.Context, session.Target, int, session.Credential) error { authenticated = true; return nil }
+			runner.Verify = func(context.Context, session.Target, int, session.Credential, func(string)) error {
+				authenticated = true
+				return nil
+			}
 			runner.Command = func(context.Context, []string) error {
 				assert.True(t, authenticated)
 				assert.Empty(t, *events)
@@ -303,10 +306,11 @@ func TestPasswordRotationVerifiesBeforePublishingAndRetainsPreviousOnFailure(t *
 			}
 			return session.Credential{Secret: value}, nil
 		})
-		runner.Verify = func(context.Context, session.Target, int, session.Credential) error {
+		runner.Verify = func(_ context.Context, _ session.Target, _ int, _ session.Credential, report func(string)) error {
 			mu.Lock()
 			defer mu.Unlock()
 			verifications++
+			assert.Equal(t, verifications == 1, report != nil, "warnings are inspected only on initial connection")
 			if verifications == 2 {
 				return errors.New("database has not accepted the rotation")
 			}

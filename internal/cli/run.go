@@ -65,6 +65,9 @@ func runSession(ctx context.Context, mode string, args []string, output io.Write
 
 func execute(ctx context.Context, p *profile.Profile, command session.Command, logger *log.Logger) error {
 	report := func(message string) { logger.Print(message) }
+	if p.Environment == "production" {
+		report("WARNING: PRODUCTION connection. Database changes affect the production environment.")
+	}
 	setupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	cfg, err := awsConfig(setupCtx, p)

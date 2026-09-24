@@ -207,8 +207,17 @@ func databaseUser(ui *prompt, p *profile.Profile, db *rdstypes.DBInstance) (stri
 	return ui.ask(userPrompt, defaultUser)
 }
 
+func connectionName(ui *prompt, p *profile.Profile) (string, error) {
+	index, err := ui.choose("Environment", []string{"Unspecified", "Development", "Staging", "Production"}, true)
+	if err != nil {
+		return "", err
+	}
+	p.Environment = []string{"", "development", "staging", "production"}[index]
+	return ui.ask("pg-tunnel connection name (used with run/connect)", p.DBInstance)
+}
+
 func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error {
-	name, err := ui.ask("pg-tunnel connection name (used with run/connect)", p.DBInstance)
+	name, err := connectionName(ui, p)
 	if err != nil {
 		return err
 	}

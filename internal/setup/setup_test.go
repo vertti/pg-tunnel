@@ -99,7 +99,7 @@ func TestWizardDiscoversAcrossPagesAndSavesOnlyAfterConfirmation(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			var output bytes.Buffer
 			// Invalid selection is retried; database name defaults to the RDS hint.
-			input := "bad\n9\n1\n1\n1\n\nreader\nreadonly\n"
+			input := "bad\n9\n1\n1\n1\n\nreader\n\nreadonly\n"
 			if answer != "EOF" {
 				input += answer + "\n"
 			}
@@ -144,7 +144,7 @@ func TestWizardDiscoveryPermissionFailures(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			var output bytes.Buffer
-			wizard := setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, service), Input: strings.NewReader("1\n1\ni-manual\n1\ndata\nreader\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
+			wizard := setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, service), Input: strings.NewReader("1\n1\ni-manual\n1\ndata\nreader\n\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
 			err := wizard.Run(t.Context())
 			if service == "sts" || service == "rds" {
 				require.Error(t, err)
@@ -233,7 +233,7 @@ func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
 			defer cancel()
 			failure := errors.New(result)
 			var output bytes.Buffer
-			wizard := setup.Wizard{Config: fixtureConfig(t, ""), Input: strings.NewReader("1\n1\n1\ndata\nreader\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
+			wizard := setup.Wizard{Config: fixtureConfig(t, ""), Input: strings.NewReader("1\n1\n1\ndata\nreader\n\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
 			wizard.Verify = func(_ context.Context, candidate *profile.Profile) error {
 				// The new profile is not on disk while the test session is running.
 				current, readErr := os.ReadFile(path) //nolint:gosec // The configuration is inside t.TempDir.
@@ -283,8 +283,8 @@ func TestWizardDefaultsToUniqueResources(t *testing.T) {
 		name, input, target, prompt string
 		singleHost                  bool
 	}{
-		{"one host", "\n\n\n\n\nreader\nreadonly\nyes\n", "i-chosen", "Jump host number [1]:", true},
-		{"multiple hosts", "\n\n2\n\n\n\nreader\nreadonly\nyes\n", "i-other", "Jump host number:", false},
+		{"one host", "\n\n\n\n\nreader\n\nreadonly\nyes\n", "i-chosen", "Jump host number [1]:", true},
+		{"multiple hosts", "\n\n2\n\n\n\nreader\n\nreadonly\nyes\n", "i-other", "Jump host number:", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -354,7 +354,7 @@ func TestWizardPasswordAuthentication(t *testing.T) {
 			var output bytes.Buffer
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			verified := false
-			wizard := setup.Wizard{Config: cfg, Input: strings.NewReader("1\n1\n" + tc.input + "password-connection\n" + answer + "\n"), Output: &output, Path: path, RootCert: certificate(t)}
+			wizard := setup.Wizard{Config: cfg, Input: strings.NewReader("1\n1\n" + tc.input + "4\npassword-connection\n" + answer + "\n"), Output: &output, Path: path, RootCert: certificate(t)}
 			wizard.Verify = func(_ context.Context, p *profile.Profile) error {
 				verified = true
 				assert.Equal(t, profile.AuthSecretsManager, p.Auth)
@@ -374,6 +374,7 @@ func TestWizardPasswordAuthentication(t *testing.T) {
 			assert.Equal(t, profile.AuthSecretsManager, saved.Auth)
 			assert.Equal(t, tc.secret, saved.SecretID)
 			assert.Equal(t, tc.user, saved.User)
+			assert.Equal(t, "production", saved.Environment)
 		})
 	}
 }
