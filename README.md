@@ -39,16 +39,16 @@ host for you.
 
 ## Setup
 
-Download a [release](https://github.com/vertti/pg-tunnel/releases/latest) and
-follow the [installation steps](docs/install.md), or build from source with [mise](https://mise.jdx.dev/getting-started.html):
+Install with [mise](https://mise.jdx.dev), which downloads the release for your
+platform:
 
 ```sh
-git clone https://github.com/vertti/pg-tunnel.git
-cd pg-tunnel
-mise trust
-mise install
-mise run build   # creates bin/pg-tunnel
+mise use -g github:vertti/pg-tunnel
 ```
+
+Or download an archive from the
+[latest release](https://github.com/vertti/pg-tunnel/releases/latest) and follow
+the [installation steps](docs/install.md).
 
 With working AWS credentials, let `init` find your database and jump host, test
 the connection, and save it under a connection name:

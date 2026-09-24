@@ -1,5 +1,17 @@
 # Development
 
+## Building from source
+
+```sh
+git clone https://github.com/vertti/pg-tunnel.git
+cd pg-tunnel
+mise trust
+mise install
+mise run build   # creates bin/pg-tunnel
+```
+
+## Tasks
+
 ```sh
 mise run build  # stripped binary: bin/pg-tunnel
 mise run test   # Testify, race detector, shuffled order, coverage.out
