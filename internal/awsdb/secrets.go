@@ -14,9 +14,14 @@ import (
 	"github.com/vertti/pg-tunnel/internal/session"
 )
 
+// SecretsAPI reads the selected secret version.
+type SecretsAPI interface {
+	GetSecretValue(context.Context, *secretsmanager.GetSecretValueInput, ...func(*secretsmanager.Options)) (*secretsmanager.GetSecretValueOutput, error)
+}
+
 // Secrets retrieves passwords from an explicitly selected Secrets Manager secret.
 type Secrets struct {
-	API *secretsmanager.Client
+	API SecretsAPI
 	ID  string
 }
 

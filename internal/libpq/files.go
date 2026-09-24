@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/vertti/pg-tunnel/internal/atomicfile"
 	"github.com/vertti/pg-tunnel/internal/session"
 )
 
@@ -165,21 +166,8 @@ func recoverSessions(root string) error {
 	return nil
 }
 
-func atomicWrite(dir, name, content string) (result error) {
-	file, err := os.CreateTemp(dir, ".credential-")
-	if err != nil {
-		return fmt.Errorf("create private replacement file: %w", err)
-	}
-	defer func() {
-		if removeErr := os.Remove(file.Name()); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			result = errors.Join(result, fmt.Errorf("remove temporary credential file: %w", removeErr))
-		}
-	}()
-	_, writeErr := file.WriteString(content)
-	if err = errors.Join(writeErr, file.Close()); err != nil {
-		return fmt.Errorf("write private settings: %w", err)
-	}
-	if err = os.Rename(file.Name(), filepath.Join(dir, name)); err != nil {
+func atomicWrite(dir, name, content string) error {
+	if err := atomicfile.Write(filepath.Join(dir, name), []byte(content)); err != nil {
 		return fmt.Errorf("publish private settings: %w", err)
 	}
 	return nil
