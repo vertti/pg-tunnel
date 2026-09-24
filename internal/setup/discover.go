@@ -16,6 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+
+	"github.com/vertti/pg-tunnel/internal/awsdb"
 )
 
 func account(ctx context.Context, cfg *aws.Config) (string, error) {
@@ -40,7 +42,7 @@ func databases(ctx context.Context, cfg *aws.Config) ([]rdstypes.DBInstance, err
 		}
 		for i := range page.DBInstances {
 			db := &page.DBInstances[i]
-			if aws.ToString(db.Engine) == "postgres" {
+			if awsdb.PostgreSQLEngine(aws.ToString(db.Engine)) {
 				result = append(result, *db)
 			}
 		}
