@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"github.com/vertti/pg-tunnel/internal/process"
 )
@@ -47,20 +49,27 @@ func TestExitCodeReportsSignalsAndCancellation(t *testing.T) {
 	assert.Equal(t, 1, process.ExitCode(errors.New("setup failed")))
 }
 
-func TestSignalStopsCommandAndPreservesStatus(t *testing.T) {
-	ctx, stop := process.SignalContext(t.Context())
-	defer stop()
-	result := make(chan error, 1)
-	go func() { result <- process.Run(ctx, []string{"sleep", "60"}, os.Environ()) }()
-	time.Sleep(100 * time.Millisecond)
-	require.NoError(t, syscall.Kill(os.Getpid(), syscall.SIGTERM))
-	select {
-	case err := <-result:
-		require.ErrorIs(t, err, context.Canceled)
-		require.ErrorContains(t, err, "received terminated")
-		assert.Equal(t, 128+int(syscall.SIGTERM), process.ExitCode(err))
-	case <-time.After(10 * time.Second):
-		t.Fatal("SIGTERM did not stop the command")
+func TestReceivedSignalIsForwardedAndPreserved(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP} {
+		t.Run(sig.String(), func(t *testing.T) {
+			record := filepath.Join(t.TempDir(), "received")
+			script := `trap 'echo received > "$0"; exit 0' ` + unix.SignalName(sig)[3:] + `; : > "$0.ready"; while :; do sleep 1; done`
+			ctx, stop := process.SignalContext(t.Context())
+			defer stop()
+			result := make(chan error, 1)
+			go func() { result <- process.Run(ctx, []string{"sh", "-c", script, record}, os.Environ()) }()
+			require.Eventually(t, func() bool { _, err := os.Stat(record + ".ready"); return err == nil }, 5*time.Second, 10*time.Millisecond)
+			require.NoError(t, syscall.Kill(os.Getpid(), sig))
+			select {
+			case err := <-result:
+				require.ErrorIs(t, err, context.Canceled)
+				require.ErrorContains(t, err, "received "+sig.String())
+				assert.Equal(t, 128+int(sig), process.ExitCode(err))
+			case <-time.After(10 * time.Second):
+				t.Fatalf("%s did not stop the command", sig)
+			}
+			assert.FileExists(t, record, "the command must receive the same signal")
+		})
 	}
 }
 

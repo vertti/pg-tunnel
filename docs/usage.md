@@ -194,8 +194,9 @@ Each session owns a mode-0700 directory and mode-0600 credential files. Password
 updates use atomic replacement. The shared `~/.pgpass` is never modified.
 Shutdown joins the refresh worker, stops the child process group, deletes private
 credentials, and attempts both local and remote tunnel cleanup. Child exit codes
-are preserved. SIGINT and SIGTERM are forwarded; processes that fail to exit are
-killed after a grace period.
+are preserved. SIGINT, SIGTERM, and SIGHUP (closing the terminal) are forwarded;
+processes that fail to exit are killed after a grace period. Ctrl-Z suspends the
+command together with pg-tunnel, and `fg` resumes both.
 
 After an uncatchable termination or machine crash, a new session automatically
 removes abandoned credential directories. Active sessions are protected by
@@ -205,9 +206,9 @@ process-held directory locks. Recovery can also be run explicitly:
 pg-tunnel cleanup
 ```
 
-SIGKILL cannot trigger immediate cleanup. Orphaned child processes or SSM sessions
-may need separate termination; recovery removes credential files, not remote
-sessions. AWS session limits provide an additional backstop. Unlike IAM tokens,
+SIGKILL cannot trigger immediate cleanup. The embedded SSM child notices that
+pg-tunnel is gone and ends its remote session; the command's own descendants may
+need separate termination. Unlike IAM tokens,
 passwords left after a crash do not expire automatically; run `pg-tunnel cleanup`
 to remove abandoned files. SSH/VPN transports, Windows, and additional client
 adapters remain later work.
