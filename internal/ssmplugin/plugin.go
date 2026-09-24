@@ -5,6 +5,7 @@ package ssmplugin
 import (
 	"errors"
 	"io"
+	"os"
 	"syscall"
 
 	"github.com/aws/session-manager-plugin/src/sessionmanagerplugin/session"
@@ -25,6 +26,14 @@ func Run(args []string, output io.Writer) error {
 	}
 	// The supervisor sends SIGTERM; upstream otherwise bypasses its graceful handler.
 	sessionutil.ControlSignals = append(sessionutil.ControlSignals, syscall.SIGTERM)
+	go StopWhenSupervisorExits(os.Stdin)
 	session.ValidateInputAndStartSession(append([]string{"pg-tunnel"}, args...), output)
 	return nil
+}
+
+// StopWhenSupervisorExits ends the session gracefully once the supervisor's end of
+// stdin closes, which also happens when the supervisor is killed.
+func StopWhenSupervisorExits(stdin io.Reader) {
+	io.Copy(io.Discard, stdin)                 //nolint:errcheck,gosec // Any read failure means the supervisor is gone.
+	syscall.Kill(os.Getpid(), syscall.SIGTERM) //nolint:errcheck,gosec // Signalling the current process cannot fail.
 }
