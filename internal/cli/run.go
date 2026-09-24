@@ -184,16 +184,19 @@ func awsConfig(ctx context.Context, p *profile.Profile) (aws.Config, error) {
 	}
 	// Discovery errors would otherwise blame IAM permissions for a missing login.
 	if _, err = cfg.Credentials.Retrieve(ctx); err != nil {
-		return cfg, fmt.Errorf("no usable AWS credentials; %s: %w", loginHint(p.AWSProfile), err)
+		loginErr := fmt.Errorf("no usable AWS credentials; %s: %w", loginHint(&cfg), err)
+		return cfg, loginErr
 	}
 	return cfg, nil
 }
 
-func loginHint(awsProfile string) string {
-	if awsProfile == "" {
-		return "log in to AWS first, for example with aws sso login --profile NAME, and select that profile with --aws-profile or aws_profile"
+func loginHint(cfg *aws.Config) string {
+	for _, source := range cfg.ConfigSources {
+		if shared, ok := source.(config.SharedConfig); ok && (shared.SSOSessionName != "" || shared.SSOStartURL != "") {
+			return "AWS profile " + shared.Profile + " uses IAM Identity Center; log in with aws sso login --profile " + shared.Profile
+		}
 	}
-	return "log in with aws sso login --profile " + awsProfile + " or renew that profile's credentials"
+	return "make AWS credentials available the way the AWS CLI finds them (environment, a named profile, or aws-vault) and select a profile with --aws-profile or aws_profile if needed"
 }
 
 func environmentExpiry() (time.Time, error) {

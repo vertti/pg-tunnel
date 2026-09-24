@@ -24,12 +24,11 @@ install -m 755 pg-tunnel ~/.local/bin/pg-tunnel
 ```
 
 Keep the extracted licenses/notices with your installation. Add `~/.local/bin`
-to your shell's `PATH`, then log in to AWS and configure a connection:
+to your shell's `PATH`. With working AWS credentials, configure a connection:
 
 ```sh
 pg-tunnel --version
-aws sso login --profile YOUR_AWS_PROFILE
-pg-tunnel init --aws-profile YOUR_AWS_PROFILE
+pg-tunnel init --aws-profile YOUR_AWS_PROFILE   # or omit it to use your current credentials
 pg-tunnel run YOUR_CONNECTION -- psql
 ```
 
