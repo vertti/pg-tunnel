@@ -82,7 +82,9 @@ func TestConcurrentSessionsAndAbandonedRecovery(t *testing.T) {
 	stale := filepath.Join(root, "session-abandoned")
 	require.NoError(t, os.Mkdir(stale, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(stale, "pgpass"), []byte("stale secret"), 0o600))
-	require.NoError(t, factory.Recover())
+	removed, err := factory.Recover()
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed, "live sessions are kept")
 	_, err = os.Stat(stale)
 	require.ErrorIs(t, err, os.ErrNotExist)
 	for _, client := range []session.Client{first, second} {
@@ -130,7 +132,7 @@ func TestRecoveryWaitsForStorageLock(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, unix.Flock(int(holder.Fd()), unix.LOCK_EX))
 	recovered := make(chan error, 1)
-	go func() { recovered <- (libpq.Files{Root: root}).Recover() }()
+	go func() { _, recoverErr := (libpq.Files{Root: root}).Recover(); recovered <- recoverErr }()
 	select {
 	case <-recovered:
 		t.Fatal("recovery ran while another session held the storage lock")
@@ -152,10 +154,12 @@ func TestStorageMustBeARealDirectory(t *testing.T) {
 	require.NoError(t, os.Mkdir(target, 0o700))
 	link := filepath.Join(directory, "link")
 	require.NoError(t, os.Symlink(target, link))
-	require.ErrorContains(t, (libpq.Files{Root: link}).Recover(), "real directory")
+	_, err := (libpq.Files{Root: link}).Recover()
+	require.ErrorContains(t, err, "real directory")
 	file := filepath.Join(directory, "file")
 	require.NoError(t, os.WriteFile(file, nil, 0o600))
-	require.ErrorContains(t, (libpq.Files{Root: file}).Recover(), "create session storage")
+	_, err = (libpq.Files{Root: file}).Recover()
+	require.ErrorContains(t, err, "create session storage")
 }
 
 func TestTLSConfigRequiresReadableCertificates(t *testing.T) {
@@ -188,12 +192,16 @@ func TestRecoveryAfterSIGKILL(t *testing.T) {
 	data, err := os.ReadFile(marker) //nolint:gosec // The marker is written by the test child in t.TempDir.
 	require.NoError(t, err)
 	dir := string(data)
-	require.NoError(t, (libpq.Files{Root: root}).Recover())
+	removed, err := (libpq.Files{Root: root}).Recover()
+	require.NoError(t, err)
+	assert.Zero(t, removed)
 	_, err = os.Stat(dir) //nolint:gosec // This path comes from the test child running under t.TempDir.
 	require.NoError(t, err, "a live owner's credentials must be retained")
 	require.NoError(t, child.Process.Kill())
 	require.Error(t, child.Wait())
-	require.NoError(t, (libpq.Files{Root: root}).Recover())
+	removed, err = (libpq.Files{Root: root}).Recover()
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
 	_, err = os.Stat(dir) //nolint:gosec // This path comes from the test child running under t.TempDir.
 	require.ErrorIs(t, err, os.ErrNotExist)
 }

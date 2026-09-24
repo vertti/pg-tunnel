@@ -17,6 +17,10 @@ import (
 func initProfile(ctx context.Context, args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
 	flags.SetOutput(output)
+	flags.Usage = func() {
+		fmt.Fprintln(output, "Usage: pg-tunnel init [--aws-profile PROFILE] [--region REGION] [--config PATH] [--sslrootcert PEM]") //nolint:errcheck // flag.Usage has no error return.
+		flags.PrintDefaults()
+	}
 	var p profile.Profile
 	flags.StringVar(&p.RootCert, "sslrootcert", "", "optional custom CA PEM file (default: automatically managed AWS RDS bundle)")
 	flags.StringVar(&p.Region, "region", "", "AWS region (defaults to AWS configuration)")
@@ -27,10 +31,10 @@ func initProfile(ctx context.Context, args []string, output io.Writer) error {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return fmt.Errorf("parse setup options: %w", err)
+		return fmt.Errorf("%w: %w", ErrUsage, err)
 	}
 	if flags.NArg() != 0 {
-		return ErrUsage
+		return usageError("init takes no arguments; pass the AWS profile with --aws-profile")
 	}
 	if *path == "" {
 		var err error
