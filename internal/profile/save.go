@@ -90,7 +90,7 @@ func profilesToSave(path string) (map[string]Profile, error) {
 
 func validateName(name string) error {
 	if name == "" || !plainText(name) {
-		return errors.New("profile name must be non-empty with no line breaks, NULs, or surrounding whitespace")
+		return errors.New("profile name must be non-empty UTF-8 without control characters or surrounding whitespace")
 	}
 	return nil
 }

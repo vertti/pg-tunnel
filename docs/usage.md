@@ -15,6 +15,11 @@ missing profile within it, is an error. An explicit missing file never falls bac
 to another location. Certificate paths are relative to the selected file, so move
 its CA bundle too if the profile uses a relative `sslrootcert` path.
 
+A `pg-tunnel.json` picked up from the current directory may not set an explicit
+`host`. Otherwise a cloned repository could pair a host and CA it controls with
+your AWS credentials or database password. Select such a file with `--config` to
+trust it.
+
 ## Interactive setup
 
 AWS Vault is optional. Use your normal AWS credentials or select a named AWS
@@ -114,10 +119,7 @@ Choose **Secrets Manager password** in `init`, or add these fields to a profile:
 The secret must contain a JSON `SecretString` with nonempty `username` and
 `password` fields. The username must match the profile's `user`; optional `host`
 and `port` must match the resolved database, and optional `engine` must be
-`postgres`. The profile's `database` selects the database. A `pg-tunnel.json` found in
-the current directory is not trusted to pair an explicit `host` with a secret: the
-secret must then contain a matching `host`, or you select the file with `--config`.
-This stops a cloned repository from sending a password to a host it chose. Binary secrets and
+`postgres`. The profile's `database` selects the database. Binary secrets and
 alternating-user rotation are not supported. The configuration stores only the
 secret identifier; passwords are never copied into it.
 

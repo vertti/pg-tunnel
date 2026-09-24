@@ -67,16 +67,13 @@ func TestDatabaseAuthSelectsConfiguredMode(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", "")
 	cfg := aws.Config{Region: "eu-central-1", Credentials: credentials.NewStaticCredentialsProvider("test", "test", "")}
 
-	for _, project := range []bool{true, false} {
-		auth, err := databaseAuth(&profile.Profile{Auth: profile.AuthSecretsManager, SecretID: "chosen", Project: project, Host: "db.example"}, &cfg, nil)
-		require.NoError(t, err)
-		secrets, ok := auth.(awsdb.Secrets)
-		require.True(t, ok)
-		assert.Equal(t, "chosen", secrets.ID)
-		assert.Equal(t, project, secrets.RequireHost)
-	}
+	auth, err := databaseAuth(&profile.Profile{Auth: profile.AuthSecretsManager, SecretID: "chosen"}, &cfg, nil)
+	require.NoError(t, err)
+	secrets, ok := auth.(awsdb.Secrets)
+	require.True(t, ok)
+	assert.Equal(t, "chosen", secrets.ID)
 
-	auth, err := databaseAuth(&profile.Profile{}, &cfg, nil)
+	auth, err = databaseAuth(&profile.Profile{}, &cfg, nil)
 	require.NoError(t, err)
 	iam, ok := auth.(awsdb.IAM)
 	require.True(t, ok)

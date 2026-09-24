@@ -29,13 +29,16 @@ func TestLoadResolvesDefaultsAndCAPath(t *testing.T) {
 func TestInvalidProfilesFailBeforeAWSAccess(t *testing.T) {
 	t.Parallel()
 	for name, input := range map[string]string{
-		"unknown field":  strings.Replace(valid, `"user"`, `"username"`, 1),
-		"ambiguous host": strings.Replace(valid, `"database"`, `"host":"db.example","database"`, 1),
-		"missing jump":   strings.Replace(valid, `"target":"i-example",`, "", 1),
-		"bad port":       strings.Replace(valid, `"database"`, `"local_port":70000,"database"`, 1),
-		"injection":      strings.Replace(valid, `"reader"`, `"reader\nsslmode=disable"`, 1),
-		"wildcard":       strings.Replace(valid, `"reader"`, `"*"`, 1),
-		"extra object":   valid + "{}",
+		"unknown field":   strings.Replace(valid, `"user"`, `"username"`, 1),
+		"ambiguous host":  strings.Replace(valid, `"database"`, `"host":"db.example","database"`, 1),
+		"missing jump":    strings.Replace(valid, `"target":"i-example",`, "", 1),
+		"bad port":        strings.Replace(valid, `"database"`, `"local_port":70000,"database"`, 1),
+		"injection":       strings.Replace(valid, `"reader"`, `"reader\nsslmode=disable"`, 1),
+		"terminal escape": strings.Replace(valid, `"reader"`, `"reader\u001b[2K"`, 1),
+		"C1 control":      strings.Replace(valid, `"data"`, `"data\u009b"`, 1),
+		"delete":          strings.Replace(valid, `"i-example"`, `"i-example\u007f"`, 1),
+		"wildcard":        strings.Replace(valid, `"reader"`, `"*"`, 1),
+		"extra object":    valid + "{}",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -67,7 +70,6 @@ func TestLoadConfigurationPrecedence(t *testing.T) {
 			value, loadErr := profile.Load("", "dev")
 			require.NoError(t, loadErr)
 			assert.Equal(t, filepath.Join(filepath.Dir(userPath), "ca.pem"), value.RootCert)
-			assert.False(t, value.Project)
 		})
 	}
 
@@ -75,7 +77,6 @@ func TestLoadConfigurationPrecedence(t *testing.T) {
 	value, err := profile.Load("", "dev")
 	require.NoError(t, err)
 	assert.Equal(t, "project-reader", value.User)
-	assert.True(t, value.Project)
 	assert.Equal(t, filepath.Join(directory, "ca.pem"), value.RootCert)
 
 	explicitPath := filepath.Join(directory, "explicit.json")
@@ -83,9 +84,20 @@ func TestLoadConfigurationPrecedence(t *testing.T) {
 	value, err = profile.Load(explicitPath, "dev")
 	require.NoError(t, err)
 	assert.Equal(t, "explicit-reader", value.User)
-	assert.False(t, value.Project)
 	_, err = profile.Load(filepath.Join(directory, "missing.json"), "dev")
 	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestProjectConfigCannotChooseDatabaseHost(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	explicitHost := `{"profiles":{"dev":{"host":"db.example","database":"data","user":"reader","target":"i-example","sslrootcert":"ca.pem"}}}`
+	require.NoError(t, os.WriteFile("pg-tunnel.json", []byte(explicitHost), 0o600))
+	_, err := profile.Load("", "dev")
+	require.ErrorContains(t, err, "--config pg-tunnel.json")
+	value, err := profile.Load("pg-tunnel.json", "dev")
+	require.NoError(t, err)
+	assert.Equal(t, "db.example", value.Host)
 }
 
 func TestLoadDoesNotFallBackFromExistingProjectConfig(t *testing.T) {
