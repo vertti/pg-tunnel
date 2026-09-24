@@ -18,7 +18,7 @@ require (
 	github.com/jackc/pgpassfile v1.0.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/stretchr/testify v1.12.1
-	github.com/twinj/uuid v0.0.0-20151029044442-89173bcdda19 // AWS plugin requires the historical UUID API.
+	github.com/twinj/uuid v1.0.0 // AWS plugin requires the historical UUID API.
 	golang.org/x/sys v0.48.0
 )
 
@@ -36,9 +36,11 @@ require (
 	github.com/cihub/seelog v0.0.0-20170130134532-f561c5e57575 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/myesui/uuid v1.0.0 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/xtaci/smux v1.5.57 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
+	gopkg.in/stretchr/testify.v1 v1.2.2 // indirect
 )
