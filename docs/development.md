@@ -1,5 +1,17 @@
 # Development
 
+## Building from source
+
+```sh
+git clone https://github.com/vertti/pg-tunnel.git
+cd pg-tunnel
+mise trust
+mise install
+mise run build   # creates bin/pg-tunnel
+```
+
+## Tasks
+
 ```sh
 mise run build  # stripped binary: bin/pg-tunnel
 mise run test   # Testify, race detector, shuffled order, coverage.out
@@ -82,6 +94,12 @@ The tag workflow verifies the commit belongs to main, reruns quality checks,
 builds packages and smoke-tests each platform, then creates a **draft** GitHub
 release. Review its assets and notes before publishing. Failed checks produce
 no draft. A manual workflow run on a branch produces CI artifacts only.
+
+Publishing the release triggers the Homebrew workflow, which renders
+`Formula/pg-tunnel.rb` from the release's `checksums.txt` and pushes it to
+[vertti/homebrew-tap](https://github.com/vertti/homebrew-tap). It runs in the
+`release` environment, which only `v*` tags can deploy to, and needs that
+environment's `HOMEBREW_TAP_TOKEN` secret with contents write access to the tap.
 
 Dependabot checks Go modules and GitHub Actions weekly, grouping minor/patch
 updates per ecosystem. Security alerts and security-fix PRs are enabled on GitHub.
