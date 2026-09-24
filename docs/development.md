@@ -95,6 +95,12 @@ builds packages and smoke-tests each platform, then creates a **draft** GitHub
 release. Review its assets and notes before publishing. Failed checks produce
 no draft. A manual workflow run on a branch produces CI artifacts only.
 
+Publishing the release triggers the Homebrew workflow, which renders
+`Formula/pg-tunnel.rb` from the release's `checksums.txt` and pushes it to
+[vertti/homebrew-tap](https://github.com/vertti/homebrew-tap). It runs in the
+`release` environment, which only `v*` tags can deploy to, and needs that
+environment's `HOMEBREW_TAP_TOKEN` secret with contents write access to the tap.
+
 Dependabot checks Go modules and GitHub Actions weekly, grouping minor/patch
 updates per ecosystem. Security alerts and security-fix PRs are enabled on GitHub.
 Mise tool pins are maintained separately.
