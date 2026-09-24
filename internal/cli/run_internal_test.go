@@ -25,17 +25,19 @@ import (
 func TestConnectReportsOnlyClientSettingsUntilStopped(t *testing.T) {
 	t.Parallel()
 	var reported []string
-	command := sessionCommand(nil, func(message string) { reported = append(reported, message) })
+	var stdout bytes.Buffer
+	command := sessionCommand(nil, &stdout, func(message string) { reported = append(reported, message) })
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	err := command(ctx, []string{"PGSERVICE=pg-tunnel", "AWS_SECRET_ACCESS_KEY=private-marker", "PGPASSFILE=/private/pgpass"})
-	require.ErrorIs(t, err, context.Canceled)
-	assert.Equal(t, []string{"Client settings (keep this session running; Ctrl-C stops it):", "PGSERVICE=pg-tunnel", "PGPASSFILE=/private/pgpass"}, reported)
+	require.NoError(t, command(ctx, []string{"PGSERVICE=pg-tunnel", "AWS_SECRET_ACCESS_KEY=private-marker", "PGPASSFILE=/private/it's here/pgpass"}), "Ctrl-C is the normal way to stop connect")
+	assert.Equal(t, "export PGSERVICE='pg-tunnel'\nexport PGPASSFILE='/private/it'\"'\"'s here/pgpass'\n", stdout.String())
+	require.Len(t, reported, 1)
+	assert.NotContains(t, reported[0], "private-marker")
 }
 
 func TestRunPassesSessionEnvironmentToCommand(t *testing.T) {
 	t.Parallel()
-	command := sessionCommand([]string{"sh", "-c", `test "$PGSERVICE" = pg-tunnel`}, func(string) {})
+	command := sessionCommand([]string{"sh", "-c", `test "$PGSERVICE" = pg-tunnel`}, io.Discard, func(string) {})
 	require.NoError(t, command(t.Context(), []string{"PGSERVICE=pg-tunnel"}))
 }
 

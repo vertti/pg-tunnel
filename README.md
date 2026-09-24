@@ -22,19 +22,24 @@ git clone https://github.com/vertti/pg-tunnel.git
 cd pg-tunnel
 mise trust
 mise install
-mise run build
-cp pg-tunnel.example.json pg-tunnel.json
+mise run build   # creates bin/pg-tunnel
 ```
 
-Edit `pg-tunnel.json` with your database, database user, SSM jump host, and
-AWS profile, or use `./bin/pg-tunnel init --profile YOUR_AWS_PROFILE`. RDS CA
-certificates are managed automatically. Authenticate to AWS, then run:
+Log in to AWS, then let `init` find your database and jump host, test the
+connection, and save it under a connection name:
 
 ```sh
-./bin/pg-tunnel run development -- psql
+aws sso login --profile YOUR_AWS_PROFILE
+pg-tunnel init --aws-profile YOUR_AWS_PROFILE
+pg-tunnel run CONNECTION -- psql
 ```
 
-The SSM jump host must reach the database. See [configuration and AWS permissions](docs/usage.md) for details.
+`init` saves to your user configuration, which every directory shares. To keep
+connections with a project instead, start from `pg-tunnel.example.json` and save
+it as `pg-tunnel.json` in the project; a project file replaces the user
+configuration while you work in that directory. RDS CA certificates are managed
+automatically. The SSM jump host must reach the database. See
+[configuration and AWS permissions](docs/usage.md) for details.
 
 ## Python and notebooks
 

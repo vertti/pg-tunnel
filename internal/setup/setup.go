@@ -240,7 +240,7 @@ func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error
 	if err := profile.Save(w.Path, name, p); err != nil {
 		return fmt.Errorf("save selected profile: %w", err)
 	}
-	return ui.print("Saved verified connection %q to %q. Connect with:\n  pg-tunnel connect --config %s %s\n", name, w.Path, shellQuote(w.Path), shellQuote(name))
+	return ui.print("Saved verified connection %q to %q. Connect with:\n  pg-tunnel connect --config %s %s\n", name, w.Path, ShellQuote(w.Path), ShellQuote(name))
 }
 
 func (w *Wizard) verify(ctx context.Context, ui *prompt, p *profile.Profile) error {
@@ -319,6 +319,7 @@ func (p *prompt) choose(label string, choices []string, defaultFirst bool) (int,
 	}
 }
 
-func shellQuote(value string) string {
+// ShellQuote quotes a value for POSIX shells.
+func ShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

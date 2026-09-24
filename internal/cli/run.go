@@ -25,6 +25,7 @@ import (
 	"github.com/vertti/pg-tunnel/internal/process"
 	"github.com/vertti/pg-tunnel/internal/profile"
 	"github.com/vertti/pg-tunnel/internal/session"
+	"github.com/vertti/pg-tunnel/internal/setup"
 )
 
 func runSession(ctx context.Context, mode string, args []string, output io.Writer) error {
@@ -62,7 +63,7 @@ func runSession(ctx context.Context, mode string, args []string, output io.Write
 		return fmt.Errorf("load connection profile: %w", err)
 	}
 	report := reporter(output)
-	return execute(ctx, &p, sessionCommand(command, report), report)
+	return execute(ctx, &p, sessionCommand(command, os.Stdout, report), report)
 }
 
 func reporter(output io.Writer) func(string) {
@@ -144,19 +145,25 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	return nil
 }
 
-func sessionCommand(command []string, report func(string)) session.Command {
+// sessionCommand runs command, or for connect prints shell exports of the client
+// settings to stdout and waits; stopping connect with a signal is a normal exit.
+func sessionCommand(command []string, stdout io.Writer, report func(string)) session.Command {
 	return func(ctx context.Context, env []string) error {
 		if len(command) > 0 {
 			return process.Run(ctx, command, env)
 		}
-		report("Client settings (keep this session running; Ctrl-C stops it):")
+		report("Client settings for other terminals follow; keep this session running (Ctrl-C closes it).")
 		for _, entry := range env {
-			if strings.HasPrefix(entry, "PG") {
-				report(entry)
+			name, value, _ := strings.Cut(entry, "=")
+			if !strings.HasPrefix(name, "PG") {
+				continue
+			}
+			if _, err := fmt.Fprintf(stdout, "export %s=%s\n", name, setup.ShellQuote(value)); err != nil {
+				return fmt.Errorf("write client settings: %w", err)
 			}
 		}
 		<-ctx.Done()
-		return fmt.Errorf("session stopped: %w", context.Cause(ctx))
+		return nil
 	}
 }
 
