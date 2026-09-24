@@ -30,35 +30,39 @@ type Profile struct {
 	RootCert    string `json:"sslrootcert,omitempty"`
 	Port        int    `json:"port"`
 	LocalPort   int    `json:"local_port"`
+	// Project marks a profile read implicitly from the current directory.
+	Project bool `json:"-"`
 }
 
 // Load reads one named profile; certificate paths are relative to its file.
 // An empty path searches the current directory, then the user config directory.
 func Load(path, name string) (Profile, error) {
-	path, err := configPath(path)
+	path, project, err := configPath(path)
 	if err != nil {
 		return Profile{}, err
 	}
-	return load(path, name)
+	value, err := load(path, name)
+	value.Project = project
+	return value, err
 }
 
-func configPath(path string) (string, error) {
+func configPath(path string) (_ string, project bool, _ error) {
 	if path != "" {
-		return path, nil
+		return path, false, nil
 	}
 	const filename = "pg-tunnel.json"
 	// A broken symlink or unreadable project config must not select another database.
 	if _, err := os.Lstat(filename); !errors.Is(err, os.ErrNotExist) {
-		return filename, nil
+		return filename, true, nil
 	}
 	path, err := UserPath()
 	if err != nil {
-		return "", fmt.Errorf("no project %s; find user configuration directory (or use --config PATH): %w", filename, err)
+		return "", false, fmt.Errorf("no project %s; find user configuration directory (or use --config PATH): %w", filename, err)
 	}
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("no configuration file found: checked %s in the current directory and %s; create one or use --config PATH", filename, path)
+		return "", false, fmt.Errorf("no configuration file found: checked %s in the current directory and %s; create one or use --config PATH", filename, path)
 	}
-	return path, nil
+	return path, false, nil
 }
 
 type configuration struct {
