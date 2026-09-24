@@ -11,7 +11,8 @@ mise run ci     # the same complete checks as GitHub Actions
 ```
 
 Tests use `stretchr/testify`, with all `testifylint` checks enabled. Suppressions
-must name the rule and explain their scope. The main CI job runs on Linux. A separate
+must name the rule and explain their scope. `mise run test` fails when total
+statement coverage drops below the floor in `mise.toml`; raise it as coverage grows. The main CI job runs on Linux. A separate
 release workflow builds all four archives on pull requests and smoke-tests them
 on native macOS/Linux amd64/arm64 runners.
 
