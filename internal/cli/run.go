@@ -180,7 +180,7 @@ func cleanup() error {
 
 func databaseAuth(p *profile.Profile, cfg *aws.Config, report func(string)) (session.Auth, error) {
 	if p.Auth == profile.AuthSecretsManager {
-		return awsdb.Secrets{API: secretsmanager.NewFromConfig(*cfg), ID: p.SecretID, RequireHost: p.Project && p.Host != ""}, nil
+		return awsdb.Secrets{API: secretsmanager.NewFromConfig(*cfg), ID: p.SecretID}, nil
 	}
 	expiry, err := environmentExpiry()
 	if err != nil {

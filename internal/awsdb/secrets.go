@@ -23,8 +23,6 @@ type SecretsAPI interface {
 type Secrets struct {
 	API SecretsAPI
 	ID  string
-	// RequireHost rejects secrets that do not name the database they belong to.
-	RequireHost bool
 }
 
 // Credential reads AWSCURRENT on every call, without persisting the secret JSON.
@@ -45,7 +43,7 @@ func (s Secrets) Credential(ctx context.Context, target session.Target) (session
 	if output.SecretString == nil {
 		return session.Credential{}, errors.New("secret must contain a JSON SecretString; binary secrets are not supported")
 	}
-	return passwordCredential(*output.SecretString, target, s.RequireHost)
+	return passwordCredential(*output.SecretString, target)
 }
 
 type databaseSecret struct {
@@ -56,7 +54,7 @@ type databaseSecret struct {
 	Port     int    `json:"port"`
 }
 
-func passwordCredential(value string, target session.Target, requireHost bool) (session.Credential, error) {
+func passwordCredential(value string, target session.Target) (session.Credential, error) {
 	var secret databaseSecret
 	if err := json.Unmarshal([]byte(value), &secret); err != nil {
 		return session.Credential{}, errors.New("secret must be a JSON object with string username/password fields and an optional numeric port")
@@ -66,9 +64,6 @@ func passwordCredential(value string, target session.Target, requireHost bool) (
 	}
 	if secret.Password == "" || strings.ContainsAny(secret.Password, "\r\n\x00") {
 		return session.Credential{}, errors.New("secret password is empty or contains characters unsupported by PostgreSQL password files")
-	}
-	if requireHost && secret.Host == "" {
-		return session.Credential{}, errors.New("secret has no host field; a project pg-tunnel.json with an explicit host needs it to match, or select this file with --config to trust it")
 	}
 	if err := secret.validateEndpoint(target); err != nil {
 		return session.Credential{}, err

@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // AuthSecretsManager selects password authentication from an explicitly chosen secret.
@@ -37,8 +39,6 @@ type Profile struct {
 	RootCert    string `json:"sslrootcert,omitempty"`
 	Port        int    `json:"port"`
 	LocalPort   int    `json:"local_port"`
-	// Project marks a profile read implicitly from the current directory.
-	Project bool `json:"-"`
 }
 
 // Load reads one named profile; certificate paths are relative to its file.
@@ -49,8 +49,14 @@ func Load(path, name string) (Profile, error) {
 		return Profile{}, err
 	}
 	value, err := load(path, name)
-	value.Project = project
-	return value, err
+	if err != nil {
+		return Profile{}, err
+	}
+	// A cloned repository could otherwise pair a host and CA it controls with the user's credentials.
+	if project && value.Host != "" {
+		return Profile{}, fmt.Errorf("profile %q in %s sets an explicit host, which a pg-tunnel.json found in the current directory may not do; trust this file with --config %s", name, path, path)
+	}
+	return value, nil
 }
 
 func configPath(path string) (_ string, project bool, _ error) {
@@ -154,7 +160,7 @@ func (p *Profile) validateText() error {
 
 	for _, value := range []string{p.DBInstance, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert, p.SecretID} {
 		if !plainText(value) {
-			return errors.New("profile values cannot contain line breaks, NULs, or surrounding whitespace")
+			return errors.New("profile values must be UTF-8 without control characters or surrounding whitespace")
 		}
 	}
 	if strings.ContainsAny(p.Host, "/:, \\*") || strings.ContainsAny(p.Database, "*") || strings.ContainsAny(p.User, "*") {
@@ -163,8 +169,9 @@ func (p *Profile) validateText() error {
 	return nil
 }
 
+// plainText rejects values that could rewrite client files or terminal output.
 func plainText(value string) bool {
-	return !strings.ContainsAny(value, "\r\n\x00") && value == strings.TrimSpace(value)
+	return utf8.ValidString(value) && !strings.ContainsFunc(value, unicode.IsControl) && value == strings.TrimSpace(value)
 }
 
 func (p *Profile) validateOptions() error {
