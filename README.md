@@ -39,10 +39,11 @@ host for you.
 
 ## Setup
 
-Install with [mise](https://mise.jdx.dev), which downloads the release for your
-platform:
+Install with [Homebrew](https://brew.sh) or [mise](https://mise.jdx.dev):
 
 ```sh
+brew install vertti/tap/pg-tunnel
+# or
 mise use -g github:vertti/pg-tunnel
 ```
 
