@@ -13,12 +13,12 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.78.0
 	github.com/aws/aws-sdk-go-v2/service/sts v1.51.0
 	github.com/aws/session-manager-plugin v0.0.0-20260615221425-930a08e65d3a
-	github.com/aws/smithy-go v1.28.1
+	github.com/aws/smithy-go v1.28.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgpassfile v1.0.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/stretchr/testify v1.12.1
-	github.com/twinj/uuid v0.0.0-20151029044442-89173bcdda19 // AWS UUID compatibility: https://github.com/aws/session-manager-plugin/issues/73
+	github.com/twinj/uuid v0.1.0 // AWS UUID compatibility: https://github.com/aws/session-manager-plugin/issues/73
 	golang.org/x/sys v0.48.0
 )
 
