@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -59,13 +60,17 @@ func runSession(ctx context.Context, mode string, args []string, output io.Write
 	if err != nil {
 		return fmt.Errorf("load connection profile: %w", err)
 	}
-	logger := log.New(output, "pg-tunnel: ", 0)
-	return execute(ctx, &p, sessionCommand(command, logger), logger)
+	report := reporter(output)
+	return execute(ctx, &p, sessionCommand(command, report), report)
 }
 
-func execute(ctx context.Context, p *profile.Profile, command session.Command, logger *log.Logger) error {
-	report := func(message string) { logger.Print(message) }
-	if p.Environment == "production" {
+func reporter(output io.Writer) func(string) {
+	logger := log.New(output, "pg-tunnel: ", 0)
+	return func(message string) { logger.Print(message) }
+}
+
+func execute(ctx context.Context, p *profile.Profile, command session.Command, report func(string)) error {
+	if p.Environment == profile.EnvironmentProduction {
 		report("WARNING: PRODUCTION connection. Database changes affect the production environment.")
 	}
 	setupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -108,15 +113,14 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, l
 	return nil
 }
 
-func sessionCommand(command []string, logger *log.Logger) session.Command {
-	report := func(message string) { logger.Print(message) }
+func sessionCommand(command []string, report func(string)) session.Command {
 	return func(ctx context.Context, env []string) error {
 		if len(command) > 0 {
 			return process.Run(ctx, command, env)
 		}
 		report("Client settings (keep this session running; Ctrl-C stops it):")
 		for _, entry := range env {
-			if len(entry) >= 2 && entry[:2] == "PG" {
+			if strings.HasPrefix(entry, "PG") {
 				report(entry)
 			}
 		}

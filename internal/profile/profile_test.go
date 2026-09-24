@@ -184,3 +184,12 @@ func TestEnvironmentRejectsMisspelledProduction(t *testing.T) {
 	p := profile.Profile{Environment: "prodution", DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432}
 	require.ErrorContains(t, p.Validate(), "environment must be")
 }
+
+func TestOversizedConfigurationReportsSizeLimit(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "pg-tunnel.json")
+	padding := `{"profiles":{"dev":{"database":"` + strings.Repeat("x", 1<<20) + `"}}}`
+	require.NoError(t, os.WriteFile(path, []byte(padding), 0o600))
+	_, err := profile.Load(path, "dev")
+	require.ErrorContains(t, err, "1 MiB size limit")
+}

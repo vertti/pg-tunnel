@@ -18,7 +18,7 @@ func TestVersion(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	require.NoError(t, cli.Run([]string{"--version"}, &output))
+	require.NoError(t, cli.RunContext(t.Context(), []string{"--version"}, &output))
 	assert.Equal(t, "pg-tunnel dev\n", output.String())
 }
 
@@ -26,7 +26,7 @@ func TestHelp(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	require.NoError(t, cli.Run([]string{"--help"}, &output))
+	require.NoError(t, cli.RunContext(t.Context(), []string{"--help"}, &output))
 	assert.Contains(t, output.String(), "Usage: pg-tunnel run")
 	assert.Contains(t, output.String(), "-version")
 }
@@ -35,7 +35,7 @@ func TestUnknownOption(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	err := cli.Run([]string{"--unknown"}, &output)
+	err := cli.RunContext(t.Context(), []string{"--unknown"}, &output)
 	require.ErrorContains(t, err, "parse options:")
 	assert.Contains(t, output.String(), "flag provided but not defined")
 }
@@ -48,7 +48,7 @@ func TestIncompleteCommands(t *testing.T) {
 			t.Parallel()
 
 			var output bytes.Buffer
-			require.ErrorIs(t, cli.Run(args, &output), cli.ErrUsage)
+			require.ErrorIs(t, cli.RunContext(t.Context(), args, &output), cli.ErrUsage)
 			assert.Empty(t, output.String())
 		})
 	}
@@ -58,7 +58,7 @@ func TestOutputFailure(t *testing.T) {
 	t.Parallel()
 
 	failure := errors.New("output unavailable")
-	err := cli.Run([]string{"--version"}, failingWriter{err: failure})
+	err := cli.RunContext(t.Context(), []string{"--version"}, failingWriter{err: failure})
 	require.ErrorIs(t, err, failure)
 }
 
@@ -76,7 +76,7 @@ func TestEmptyExplicitConfigIsRejected(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			var output bytes.Buffer
-			err := cli.Run([]string{mode, "--config=", "dev"}, &output)
+			err := cli.RunContext(t.Context(), []string{mode, "--config=", "dev"}, &output)
 			require.ErrorContains(t, err, "--config requires a non-empty path")
 		})
 	}
@@ -85,13 +85,13 @@ func TestEmptyExplicitConfigIsRejected(t *testing.T) {
 func TestInitHelpRequiresNeitherTerminalNorAWS(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
-	require.NoError(t, cli.Run([]string{"init", "--help"}, &output))
+	require.NoError(t, cli.RunContext(t.Context(), []string{"init", "--help"}, &output))
 	assert.Contains(t, output.String(), "-region")
 	assert.Contains(t, output.String(), "-aws-profile")
 	assert.Contains(t, output.String(), "\n  -profile string\n")
 	assert.Contains(t, output.String(), "-config")
 	for _, option := range []string{"--profile", "--aws-profile"} {
-		require.ErrorIs(t, cli.Run([]string{"init", option, "dev", "unexpected"}, &output), cli.ErrUsage)
+		require.ErrorIs(t, cli.RunContext(t.Context(), []string{"init", option, "dev", "unexpected"}, &output), cli.ErrUsage)
 	}
 }
 
@@ -103,7 +103,7 @@ func TestProductionWarningBeforeConnection(t *testing.T) {
 		p := profile.Profile{Environment: environment, DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432, AWSProfile: "missing-test-profile"}
 		require.NoError(t, profile.Save(path, "test", &p))
 		var output bytes.Buffer
-		err := cli.Run([]string{"connect", "--config", path, "test"}, &output)
+		err := cli.RunContext(t.Context(), []string{"connect", "--config", path, "test"}, &output)
 		require.ErrorContains(t, err, "load AWS configuration")
 		assert.Equal(t, environment == "production", strings.Contains(output.String(), "WARNING: PRODUCTION"))
 	}

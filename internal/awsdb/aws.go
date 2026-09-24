@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -107,7 +108,7 @@ func (a IAM) Credential(ctx context.Context, target session.Target) (session.Cre
 	}
 	expiry := time.Now().Add(15 * time.Minute)
 	var awsExpiry time.Time
-	if value.Source == "EnvConfigCredentials" {
+	if value.Source == config.CredentialsSourceName {
 		awsExpiry = a.EnvironmentExpiry
 	}
 	if value.CanExpire {

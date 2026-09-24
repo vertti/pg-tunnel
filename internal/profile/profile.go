@@ -14,6 +14,13 @@ import (
 // AuthSecretsManager selects password authentication from an explicitly chosen secret.
 const AuthSecretsManager = "secrets-manager"
 
+// Environment classifications; production prints a warning at startup.
+const (
+	EnvironmentDevelopment = "development"
+	EnvironmentStaging     = "staging"
+	EnvironmentProduction  = "production"
+)
+
 // Profile configures a database session without storing credentials.
 type Profile struct {
 	Environment string `json:"environment,omitempty"`
@@ -79,15 +86,15 @@ func readConfig(path string) (configuration, error) {
 	limited := &io.LimitedReader{R: file, N: (1 << 20) + 1}
 	decoder := json.NewDecoder(limited)
 	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(&config); err != nil {
-		return configuration{}, fmt.Errorf("decode profiles %s: %w", path, err)
-	}
-	var extra any
-	if err = decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return configuration{}, fmt.Errorf("profiles %s must contain exactly one JSON object", path)
+	err = decoder.Decode(&config)
+	if err == nil && !errors.Is(decoder.Decode(new(any)), io.EOF) {
+		err = errors.New("must contain exactly one JSON object")
 	}
 	if limited.N == 0 {
 		return configuration{}, errors.New("configuration exceeds the 1 MiB size limit")
+	}
+	if err != nil {
+		return configuration{}, fmt.Errorf("decode profiles %s: %w", path, err)
 	}
 	return config, nil
 }
@@ -146,7 +153,7 @@ func (p *Profile) validateText() error {
 	}
 
 	for _, value := range []string{p.DBInstance, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert, p.SecretID} {
-		if strings.ContainsAny(value, "\r\n\x00") || value != strings.TrimSpace(value) {
+		if !plainText(value) {
 			return errors.New("profile values cannot contain line breaks, NULs, or surrounding whitespace")
 		}
 	}
@@ -156,9 +163,13 @@ func (p *Profile) validateText() error {
 	return nil
 }
 
+func plainText(value string) bool {
+	return !strings.ContainsAny(value, "\r\n\x00") && value == strings.TrimSpace(value)
+}
+
 func (p *Profile) validateOptions() error {
 	switch p.Environment {
-	case "", "development", "staging", "production":
+	case "", EnvironmentDevelopment, EnvironmentStaging, EnvironmentProduction:
 	default:
 		return errors.New("environment must be development, staging, or production (omit when unknown)")
 	}

@@ -13,11 +13,6 @@ import (
 // ErrUsage indicates an incomplete or unsupported command.
 var ErrUsage = errors.New("use pg-tunnel run [--config pg-tunnel.json] PROFILE -- COMMAND, connect PROFILE, init, or cleanup")
 
-// Run parses command-line options and writes help or version information.
-func Run(args []string, output io.Writer) error {
-	return RunContext(context.Background(), args, output)
-}
-
 // RunContext executes commands until completion or cancellation.
 func RunContext(ctx context.Context, args []string, output io.Writer) error {
 	if len(args) > 0 {
