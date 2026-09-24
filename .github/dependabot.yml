@@ -4,6 +4,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # AWS still requires the pre-v1 API; remove when upstream resolves this:
+      # https://github.com/aws/session-manager-plugin/issues/73
+      - dependency-name: github.com/twinj/uuid
+        versions: ["1.0.0"]
     groups:
       go-modules:
         patterns: ["*"]
