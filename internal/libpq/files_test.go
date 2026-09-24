@@ -1,7 +1,6 @@
 package libpq_test
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/vertti/pg-tunnel/internal/atomicfile"
 	"github.com/vertti/pg-tunnel/internal/libpq"
 	"github.com/vertti/pg-tunnel/internal/session"
 )
@@ -121,12 +121,28 @@ func TestUnsafeStorageAndSettingsRejected(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
-func TestCredentialFormattingIsRedacted(t *testing.T) {
+func TestStorageMustBeARealDirectory(t *testing.T) {
 	t.Parallel()
-	credential := session.Credential{Secret: "never-log-this"}
-	for _, format := range []string{"%s", "%v", "%+v", "%#v"} {
-		assert.NotContains(t, fmt.Sprintf(format, credential), credential.Secret)
-	}
+	directory := t.TempDir()
+	target := filepath.Join(directory, "real")
+	require.NoError(t, os.Mkdir(target, 0o700))
+	link := filepath.Join(directory, "link")
+	require.NoError(t, os.Symlink(target, link))
+	require.ErrorContains(t, (libpq.Files{Root: link}).Recover(), "real directory")
+	file := filepath.Join(directory, "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+	require.ErrorContains(t, (libpq.Files{Root: file}).Recover(), "create session storage")
+}
+
+func TestTLSConfigRequiresReadableCertificates(t *testing.T) {
+	t.Parallel()
+	missing := filepath.Join(t.TempDir(), "missing.pem")
+	_, err := libpq.TLSConfig(session.Target{RootCert: missing})
+	require.ErrorIs(t, err, os.ErrNotExist)
+	empty := filepath.Join(t.TempDir(), "empty.pem")
+	require.NoError(t, os.WriteFile(empty, []byte("no certificates"), 0o600))
+	_, err = libpq.TLSConfig(session.Target{RootCert: empty})
+	require.ErrorContains(t, err, "no usable PEM")
 }
 
 func TestRecoveryAfterSIGKILL(t *testing.T) {
@@ -168,6 +184,6 @@ func TestCredentialOwnerHelper(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	dir := filepath.Dir(envValue(client.Env(nil), "PGPASSFILE"))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "ready"), []byte(dir), 0o600)) //nolint:gosec // The parent supplies its t.TempDir path to this subprocess fixture.
+	require.NoError(t, atomicfile.Write(filepath.Join(root, "ready"), []byte(dir)))
 	time.Sleep(time.Hour)
 }

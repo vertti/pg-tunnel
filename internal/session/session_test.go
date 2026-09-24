@@ -3,6 +3,7 @@ package session_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -350,4 +351,12 @@ func TestPasswordRotationVerifiesBeforePublishingAndRetainsPreviousOnFailure(t *
 		require.NoError(t, <-result)
 		assert.Equal(t, []string{"client closed", "tunnel closed"}, *events)
 	})
+}
+
+func TestCredentialFormattingIsRedacted(t *testing.T) {
+	t.Parallel()
+	credential := session.Credential{Secret: "never-log-this"}
+	for _, format := range []string{"%s", "%v", "%+v", "%#v"} {
+		assert.NotContains(t, fmt.Sprintf(format, credential), credential.Secret)
+	}
 }

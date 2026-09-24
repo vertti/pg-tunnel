@@ -151,3 +151,19 @@ func TestRDSCASources(t *testing.T) {
 		})
 	}
 }
+
+func TestRDSCAUsesFreshUserCacheWithoutNetwork(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	cache, err := os.UserCacheDir()
+	require.NoError(t, err)
+	for region, name := range map[string]string{"eu-central-1": "aws.pem", "cn-north-1": "aws-cn.pem", "us-gov-west-1": "aws-us-gov.pem"} {
+		path := filepath.Join(cache, "pg-tunnel", "certificates", name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+		require.NoError(t, os.WriteFile(path, testCA(t, time.Now().Add(time.Hour)), 0o600))
+		got, caErr := RDSCA(t.Context(), region, nil)
+		require.NoError(t, caErr)
+		assert.Equal(t, path, got)
+	}
+}

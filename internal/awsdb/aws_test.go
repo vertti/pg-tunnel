@@ -239,3 +239,62 @@ func TestPasswordAuthenticationDoesNotRequireRDSIAM(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "db.example", target.Host)
 }
+
+func TestIAMReportsCredentialExpiryKnowledge(t *testing.T) {
+	t.Parallel()
+	expiry := time.Now().Add(time.Hour).Truncate(time.Second)
+	for _, tc := range []struct {
+		name, want string
+		value      aws.Credentials
+	}{
+		{"expiring", "AWS credentials expire " + expiry.Format(time.RFC3339), aws.Credentials{CanExpire: true, Expires: expiry}},
+		{"unknown temporary", "static environment credentials cannot be renewed", aws.Credentials{SessionToken: "token"}},
+		{"long-term", "expiry is not reported", aws.Credentials{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			value := tc.value
+			value.AccessKeyID, value.SecretAccessKey = "test", "test"
+			var reported []string
+			auth := awsdb.IAM{Region: "eu-central-1", Report: func(message string) { reported = append(reported, message) }, Provider: providerFunc(func(context.Context) (aws.Credentials, error) { return value, nil })}
+			_, err := auth.Credential(t.Context(), session.Target{Host: "db.example", Port: 5432, User: "reader"})
+			require.NoError(t, err)
+			require.Len(t, reported, 1)
+			assert.Contains(t, reported[0], tc.want)
+		})
+	}
+}
+
+func TestRDSDiscoveryRejectsUnusableInstances(t *testing.T) {
+	t.Parallel()
+	address := aws.String("real.rds.amazonaws.com")
+	for _, tc := range []struct {
+		err        error
+		name, want string
+		instances  []rdstypes.DBInstance
+	}{
+		{name: "API failure", err: errors.New("AccessDenied"), want: "rds:DescribeDBInstances permission"},
+		{name: "no instance", want: "found 0"},
+		{name: "other engine", instances: []rdstypes.DBInstance{{Engine: aws.String("mysql")}}, want: "RDS PostgreSQL"},
+		{name: "no endpoint", instances: []rdstypes.DBInstance{{Engine: aws.String("postgres"), IAMDatabaseAuthenticationEnabled: aws.Bool(true)}}, want: "usable database endpoint"},
+		{name: "endpoint without port", instances: []rdstypes.DBInstance{{Engine: aws.String("postgres"), IAMDatabaseAuthenticationEnabled: aws.Bool(true), Endpoint: &rdstypes.Endpoint{Address: address}}}, want: "usable database endpoint"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			api := rdsFunc(func(context.Context, *rds.DescribeDBInstancesInput) (*rds.DescribeDBInstancesOutput, error) {
+				return &rds.DescribeDBInstancesOutput{DBInstances: tc.instances}, tc.err
+			})
+			r := awsdb.Resolver{API: api, Profile: &profile.Profile{DBInstance: "example"}}
+			_, err := r.Resolve(t.Context())
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestExplicitHostSkipsRDSDiscovery(t *testing.T) {
+	t.Parallel()
+	r := awsdb.Resolver{Profile: &profile.Profile{Host: "db.example", Port: 6432, Database: "data", User: "reader"}}
+	target, err := r.Resolve(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, session.Target{Host: "db.example", Port: 6432, Database: "data", User: "reader"}, target)
+}
