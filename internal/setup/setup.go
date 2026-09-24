@@ -67,7 +67,8 @@ func (w *Wizard) Run(ctx context.Context) error {
 		return detailsErr
 	}
 	if p.RootCert == "" {
-		if _, err = awsdb.RDSCA(ctx, w.Config.Region, func(message string) { log.New(w.Output, "", 0).Print(message) }); err != nil {
+		logger := log.New(w.Output, "", 0)
+		if _, err = awsdb.RDSCA(ctx, w.Config.Region, func(message string) { logger.Print(message) }); err != nil {
 			return fmt.Errorf("prepare automatic RDS certificates: %w", err)
 		}
 	}
@@ -177,18 +178,13 @@ func connectionDetails(ui *prompt, p *profile.Profile, db *rdstypes.DBInstance) 
 	if p.User, err = databaseUser(ui, p, db); err != nil {
 		return err
 	}
-	if p.RootCert == "" {
-		if err = p.Validate(); err != nil {
-			return fmt.Errorf("validate discovered profile: %w", err)
+	if p.RootCert != "" {
+		if p.RootCert, err = filepath.Abs(p.RootCert); err != nil {
+			return fmt.Errorf("resolve CA path: %w", err)
 		}
-		return nil
-	}
-	p.RootCert, err = filepath.Abs(p.RootCert)
-	if err != nil {
-		return fmt.Errorf("resolve CA path: %w", err)
-	}
-	if _, err = libpq.TLSConfig(session.Target{RootCert: p.RootCert}); err != nil {
-		return fmt.Errorf("validate CA bundle: %w", err)
+		if _, err = libpq.TLSConfig(session.Target{RootCert: p.RootCert}); err != nil {
+			return fmt.Errorf("validate CA bundle: %w", err)
+		}
 	}
 	if err = p.Validate(); err != nil {
 		return fmt.Errorf("validate discovered profile: %w", err)
@@ -212,7 +208,7 @@ func connectionName(ui *prompt, p *profile.Profile) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	p.Environment = []string{"", "development", "staging", "production"}[index]
+	p.Environment = []string{"", profile.EnvironmentDevelopment, profile.EnvironmentStaging, profile.EnvironmentProduction}[index]
 	return ui.ask("pg-tunnel connection name (used with run/connect)", p.DBInstance)
 }
 
@@ -244,7 +240,7 @@ func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error
 	if err := profile.Save(w.Path, name, p); err != nil {
 		return fmt.Errorf("save selected profile: %w", err)
 	}
-	return ui.print("Saved verified connection %q to %q. Connect with:\n  pg-tunnel connect --config %s %s\n", name, w.Path, shellQuote(w.Path), shellQuote(name))
+	return ui.print("Saved verified connection %q to %q. Connect with:\n  pg-tunnel connect --config %s %s\n", name, w.Path, ShellQuote(w.Path), ShellQuote(name))
 }
 
 func (w *Wizard) verify(ctx context.Context, ui *prompt, p *profile.Profile) error {
@@ -323,6 +319,7 @@ func (p *prompt) choose(label string, choices []string, defaultFirst bool) (int,
 	}
 }
 
-func shellQuote(value string) string {
+// ShellQuote quotes a value for POSIX shells.
+func ShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

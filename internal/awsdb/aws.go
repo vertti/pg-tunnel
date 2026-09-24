@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -50,8 +51,8 @@ func (r *Resolver) Resolve(ctx context.Context) (session.Target, error) {
 		return target, fmt.Errorf("expected one RDS instance, found %d", len(output.DBInstances))
 	}
 	db := output.DBInstances[0]
-	if aws.ToString(db.Engine) != "postgres" {
-		return target, errors.New("the first AWS backend supports RDS PostgreSQL instances; use an explicit host for other PostgreSQL endpoints")
+	if !PostgreSQLEngine(aws.ToString(db.Engine)) {
+		return target, errors.New("only RDS and Aurora PostgreSQL instances are supported; use an explicit host for other PostgreSQL endpoints")
 	}
 	if r.Profile.Auth != profile.AuthSecretsManager && !aws.ToBool(db.IAMDatabaseAuthenticationEnabled) {
 		return target, errors.New("IAM database authentication is disabled on this RDS instance")
@@ -61,6 +62,11 @@ func (r *Resolver) Resolve(ctx context.Context) (session.Target, error) {
 	}
 	target.Host, target.Port = aws.ToString(db.Endpoint.Address), int(aws.ToInt32(db.Endpoint.Port))
 	return target, nil
+}
+
+// PostgreSQLEngine reports whether an RDS engine name is PostgreSQL.
+func PostgreSQLEngine(engine string) bool {
+	return engine == "postgres" || engine == "aurora-postgresql"
 }
 
 // JumpHost returns the configured instance or the unique running tag match.
@@ -107,7 +113,7 @@ func (a IAM) Credential(ctx context.Context, target session.Target) (session.Cre
 	}
 	expiry := time.Now().Add(15 * time.Minute)
 	var awsExpiry time.Time
-	if value.Source == "EnvConfigCredentials" {
+	if value.Source == config.CredentialsSourceName {
 		awsExpiry = a.EnvironmentExpiry
 	}
 	if value.CanExpire {

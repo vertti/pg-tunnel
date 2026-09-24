@@ -6,13 +6,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // AuthSecretsManager selects password authentication from an explicitly chosen secret.
 const AuthSecretsManager = "secrets-manager"
+
+// Environment classifications; production prints a warning at startup.
+const (
+	EnvironmentDevelopment = "development"
+	EnvironmentStaging     = "staging"
+	EnvironmentProduction  = "production"
+)
 
 // Profile configures a database session without storing credentials.
 type Profile struct {
@@ -35,30 +46,38 @@ type Profile struct {
 // Load reads one named profile; certificate paths are relative to its file.
 // An empty path searches the current directory, then the user config directory.
 func Load(path, name string) (Profile, error) {
-	path, err := configPath(path)
+	path, project, err := configPath(path)
 	if err != nil {
 		return Profile{}, err
 	}
-	return load(path, name)
+	value, err := load(path, name)
+	if err != nil {
+		return Profile{}, err
+	}
+	// A cloned repository could otherwise pair a host and CA it controls with the user's credentials.
+	if project && value.Host != "" {
+		return Profile{}, fmt.Errorf("profile %q in %s sets an explicit host, which a pg-tunnel.json found in the current directory may not do; trust this file with --config %s", name, path, path)
+	}
+	return value, nil
 }
 
-func configPath(path string) (string, error) {
+func configPath(path string) (_ string, project bool, _ error) {
 	if path != "" {
-		return path, nil
+		return path, false, nil
 	}
 	const filename = "pg-tunnel.json"
 	// A broken symlink or unreadable project config must not select another database.
 	if _, err := os.Lstat(filename); !errors.Is(err, os.ErrNotExist) {
-		return filename, nil
+		return filename, true, nil
 	}
 	path, err := UserPath()
 	if err != nil {
-		return "", fmt.Errorf("no project %s; find user configuration directory (or use --config PATH): %w", filename, err)
+		return "", false, fmt.Errorf("no project %s; find user configuration directory (or use --config PATH): %w", filename, err)
 	}
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("no configuration file found: checked %s in the current directory and %s; create one or use --config PATH", filename, path)
+		return "", false, fmt.Errorf("no configuration file found: checked %s in the current directory and %s; create one or use --config PATH", filename, path)
 	}
-	return path, nil
+	return path, false, nil
 }
 
 type configuration struct {
@@ -75,15 +94,15 @@ func readConfig(path string) (configuration, error) {
 	limited := &io.LimitedReader{R: file, N: (1 << 20) + 1}
 	decoder := json.NewDecoder(limited)
 	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(&config); err != nil {
-		return configuration{}, fmt.Errorf("decode profiles %s: %w", path, err)
-	}
-	var extra any
-	if err = decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return configuration{}, fmt.Errorf("profiles %s must contain exactly one JSON object", path)
+	err = decoder.Decode(&config)
+	if err == nil && !errors.Is(decoder.Decode(new(any)), io.EOF) {
+		err = errors.New("must contain exactly one JSON object")
 	}
 	if limited.N == 0 {
 		return configuration{}, errors.New("configuration exceeds the 1 MiB size limit")
+	}
+	if err != nil {
+		return configuration{}, fmt.Errorf("decode profiles %s: %w", path, err)
 	}
 	return config, nil
 }
@@ -95,7 +114,7 @@ func load(path, name string) (Profile, error) {
 	}
 	value, ok := config.Profiles[name]
 	if !ok {
-		return Profile{}, fmt.Errorf("profile %q does not exist in %s", name, path)
+		return Profile{}, fmt.Errorf("profile %q does not exist in %s; %s", name, path, available(config.Profiles))
 	}
 	if value.Port == 0 {
 		value.Port = 5432
@@ -114,6 +133,13 @@ func load(path, name string) (Profile, error) {
 		return Profile{}, fmt.Errorf("resolve CA certificate path: %w", err)
 	}
 	return value, nil
+}
+
+func available(profiles map[string]Profile) string {
+	if len(profiles) == 0 {
+		return "it has no connections yet; create one with pg-tunnel init"
+	}
+	return "available: " + strings.Join(slices.Sorted(maps.Keys(profiles)), ", ")
 }
 
 // Validate rejects ambiguous discovery and unsafe client-file values.
@@ -142,8 +168,8 @@ func (p *Profile) validateText() error {
 	}
 
 	for _, value := range []string{p.DBInstance, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert, p.SecretID} {
-		if strings.ContainsAny(value, "\r\n\x00") || value != strings.TrimSpace(value) {
-			return errors.New("profile values cannot contain line breaks, NULs, or surrounding whitespace")
+		if !plainText(value) {
+			return errors.New("profile values must be UTF-8 without control characters or surrounding whitespace")
 		}
 	}
 	if strings.ContainsAny(p.Host, "/:, \\*") || strings.ContainsAny(p.Database, "*") || strings.ContainsAny(p.User, "*") {
@@ -152,9 +178,14 @@ func (p *Profile) validateText() error {
 	return nil
 }
 
+// plainText rejects values that could rewrite client files or terminal output.
+func plainText(value string) bool {
+	return utf8.ValidString(value) && !strings.ContainsFunc(value, unicode.IsControl) && value == strings.TrimSpace(value)
+}
+
 func (p *Profile) validateOptions() error {
 	switch p.Environment {
-	case "", "development", "staging", "production":
+	case "", EnvironmentDevelopment, EnvironmentStaging, EnvironmentProduction:
 	default:
 		return errors.New("environment must be development, staging, or production (omit when unknown)")
 	}

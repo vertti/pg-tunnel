@@ -29,13 +29,16 @@ func TestLoadResolvesDefaultsAndCAPath(t *testing.T) {
 func TestInvalidProfilesFailBeforeAWSAccess(t *testing.T) {
 	t.Parallel()
 	for name, input := range map[string]string{
-		"unknown field":  strings.Replace(valid, `"user"`, `"username"`, 1),
-		"ambiguous host": strings.Replace(valid, `"database"`, `"host":"db.example","database"`, 1),
-		"missing jump":   strings.Replace(valid, `"target":"i-example",`, "", 1),
-		"bad port":       strings.Replace(valid, `"database"`, `"local_port":70000,"database"`, 1),
-		"injection":      strings.Replace(valid, `"reader"`, `"reader\nsslmode=disable"`, 1),
-		"wildcard":       strings.Replace(valid, `"reader"`, `"*"`, 1),
-		"extra object":   valid + "{}",
+		"unknown field":   strings.Replace(valid, `"user"`, `"username"`, 1),
+		"ambiguous host":  strings.Replace(valid, `"database"`, `"host":"db.example","database"`, 1),
+		"missing jump":    strings.Replace(valid, `"target":"i-example",`, "", 1),
+		"bad port":        strings.Replace(valid, `"database"`, `"local_port":70000,"database"`, 1),
+		"injection":       strings.Replace(valid, `"reader"`, `"reader\nsslmode=disable"`, 1),
+		"terminal escape": strings.Replace(valid, `"reader"`, `"reader\u001b[2K"`, 1),
+		"C1 control":      strings.Replace(valid, `"data"`, `"data\u009b"`, 1),
+		"delete":          strings.Replace(valid, `"i-example"`, `"i-example\u007f"`, 1),
+		"wildcard":        strings.Replace(valid, `"reader"`, `"*"`, 1),
+		"extra object":    valid + "{}",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -83,6 +86,18 @@ func TestLoadConfigurationPrecedence(t *testing.T) {
 	assert.Equal(t, "explicit-reader", value.User)
 	_, err = profile.Load(filepath.Join(directory, "missing.json"), "dev")
 	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestProjectConfigCannotChooseDatabaseHost(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	explicitHost := `{"profiles":{"dev":{"host":"db.example","database":"data","user":"reader","target":"i-example","sslrootcert":"ca.pem"}}}`
+	require.NoError(t, os.WriteFile("pg-tunnel.json", []byte(explicitHost), 0o600))
+	_, err := profile.Load("", "dev")
+	require.ErrorContains(t, err, "--config pg-tunnel.json")
+	value, err := profile.Load("pg-tunnel.json", "dev")
+	require.NoError(t, err)
+	assert.Equal(t, "db.example", value.Host)
 }
 
 func TestLoadDoesNotFallBackFromExistingProjectConfig(t *testing.T) {
@@ -176,8 +191,31 @@ func TestExplicitAuthenticationConfiguration(t *testing.T) {
 	}
 }
 
+func TestPasswordFileWildcardsAreRejected(t *testing.T) {
+	t.Parallel()
+	base := profile.Profile{DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432}
+	for name, edit := range map[string]func(*profile.Profile){
+		"database": func(p *profile.Profile) { p.Database = "*" },
+		"user":     func(p *profile.Profile) { p.User = "*" },
+		"host":     func(p *profile.Profile) { p.DBInstance, p.Host, p.RootCert = "", "*.example", "ca.pem" },
+	} {
+		p := base
+		edit(&p)
+		require.ErrorContains(t, p.Validate(), "wildcards", name)
+	}
+}
+
 func TestEnvironmentRejectsMisspelledProduction(t *testing.T) {
 	t.Parallel()
 	p := profile.Profile{Environment: "prodution", DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432}
 	require.ErrorContains(t, p.Validate(), "environment must be")
+}
+
+func TestOversizedConfigurationReportsSizeLimit(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "pg-tunnel.json")
+	padding := `{"profiles":{"dev":{"database":"` + strings.Repeat("x", 1<<20) + `"}}}`
+	require.NoError(t, os.WriteFile(path, []byte(padding), 0o600))
+	_, err := profile.Load(path, "dev")
+	require.ErrorContains(t, err, "1 MiB size limit")
 }

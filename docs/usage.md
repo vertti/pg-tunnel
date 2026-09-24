@@ -1,5 +1,9 @@
 # Configuration and usage
 
+A connection (the `CONNECTION` argument of `run` and `connect`) is a named entry
+under `profiles` in `pg-tunnel.json`. It is unrelated to AWS profiles, which
+select AWS credentials.
+
 Both `run` and `connect` select one configuration file, in this order:
 
 1. The explicit `--config PATH`, if supplied before the profile name.
@@ -15,15 +19,20 @@ missing profile within it, is an error. An explicit missing file never falls bac
 to another location. Certificate paths are relative to the selected file, so move
 its CA bundle too if the profile uses a relative `sslrootcert` path.
 
+A `pg-tunnel.json` picked up from the current directory may not set an explicit
+`host`. Otherwise a cloned repository could pair a host and CA it controls with
+your AWS credentials or database password. Select such a file with `--config` to
+trust it.
+
 ## Interactive setup
 
 AWS Vault is optional. Use your normal AWS credentials or select a named AWS
-profile directly (`--profile` and `--aws-profile` are aliases):
+profile directly (`--profile` is an alias of `--aws-profile`):
 
 ```sh
 pg-tunnel init --region eu-central-1
 # Or use a named AWS profile (region comes from it when configured):
-pg-tunnel init --profile dev
+pg-tunnel init --aws-profile dev
 ```
 
 For an SSO profile, log in first with `aws sso login --profile dev`. The selected
@@ -142,6 +151,12 @@ It supplies `PGSERVICE`, `PGSERVICEFILE`, and `PGPASSFILE` pointing to private
 per-session files, replacing inherited `PG*` settings. Command output is left on
 stdout; tunnel diagnostics go to stderr. The real database hostname remains the
 TLS identity, while `hostaddr=127.0.0.1` routes libpq through the local tunnel.
+Go programs using pgx ignore `hostaddr` in service files; point them at
+`127.0.0.1` and the tunnel port while keeping the real hostname for TLS.
+
+The tunnel listens on `127.0.0.1`, so other accounts on the same machine can
+reach the database through it while it runs. They still need database
+credentials, which stay in files only your account can read.
 
 A notebook launched through the utility can use a libpq-based driver directly:
 
@@ -168,9 +183,11 @@ For a separately launched client:
 pg-tunnel connect development
 ```
 
-This keeps the session alive and prints the three environment settings. Supply
-those values to the other client or configure its service/password file paths.
-GUI support depends on the client's libpq/service-file capabilities.
+This keeps the session alive and prints the three settings to stdout as shell
+`export` lines; paste them into another terminal or configure the client's
+service and password file paths. Diagnostics go to stderr. Ctrl-C closes the
+session and exits 0. GUI support depends on the client's libpq/service-file
+capabilities.
 
 ## Renewal and cleanup
 
@@ -188,9 +205,11 @@ password environment variable cannot be updated, so the utility uses file lookup
 Each session owns a mode-0700 directory and mode-0600 credential files. Password
 updates use atomic replacement. The shared `~/.pgpass` is never modified.
 Shutdown joins the refresh worker, stops the child process group, deletes private
-credentials, and attempts both local and remote tunnel cleanup. Child exit codes
-are preserved. SIGINT and SIGTERM are forwarded; processes that fail to exit are
-killed after a grace period.
+credentials, and attempts both local and remote tunnel cleanup. `run` exits with
+the command's status. pg-tunnel's own failures exit 1, usage mistakes exit 2, and
+signals exit 128 plus the signal number. SIGINT, SIGTERM, and SIGHUP (closing the terminal) are forwarded;
+processes that fail to exit are killed after a grace period. Ctrl-Z suspends the
+command together with pg-tunnel, and `fg` resumes both.
 
 After an uncatchable termination or machine crash, a new session automatically
 removes abandoned credential directories. Active sessions are protected by
@@ -200,9 +219,9 @@ process-held directory locks. Recovery can also be run explicitly:
 pg-tunnel cleanup
 ```
 
-SIGKILL cannot trigger immediate cleanup. Orphaned child processes or SSM sessions
-may need separate termination; recovery removes credential files, not remote
-sessions. AWS session limits provide an additional backstop. Unlike IAM tokens,
+SIGKILL cannot trigger immediate cleanup. The embedded SSM child notices that
+pg-tunnel is gone and ends its remote session; the command's own descendants may
+need separate termination. Unlike IAM tokens,
 passwords left after a crash do not expire automatically; run `pg-tunnel cleanup`
 to remove abandoned files. SSH/VPN transports, Windows, and additional client
 adapters remain later work.

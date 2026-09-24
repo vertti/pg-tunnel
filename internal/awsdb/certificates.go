@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/vertti/pg-tunnel/internal/atomicfile"
 )
 
 const maxBundleSize = 1 << 20
@@ -121,24 +123,11 @@ func validateBundle(data []byte) error {
 	return nil
 }
 
-func saveCA(path string, data []byte) (result error) {
+func saveCA(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create certificate cache: %w", err)
 	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".ca-*")
-	if err != nil {
-		return fmt.Errorf("create temporary CA bundle: %w", err)
-	}
-	defer func() {
-		if removeErr := os.Remove(file.Name()); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			result = errors.Join(result, fmt.Errorf("remove temporary CA bundle: %w", removeErr))
-		}
-	}()
-	_, writeErr := file.Write(data)
-	if err = errors.Join(writeErr, file.Close()); err != nil {
-		return fmt.Errorf("write CA bundle: %w", err)
-	}
-	if err = os.Rename(file.Name(), path); err != nil {
+	if err := atomicfile.Write(path, data); err != nil {
 		return fmt.Errorf("publish CA bundle: %w", err)
 	}
 	return nil

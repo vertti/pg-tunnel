@@ -3,6 +3,7 @@ package session_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -72,6 +73,16 @@ func fixture() (session.Runner, *fakeTunnel, *fakeClient, *[]string) {
 		Command: func(context.Context, []string) error { return nil },
 	}
 	return runner, tunnel, client, &events
+}
+
+func TestCommandReceivesClientEnvironment(t *testing.T) {
+	t.Parallel()
+	runner, _, _, _ := fixture()
+	runner.Env = []string{"PGPASSWORD=inherited"}
+	var received []string
+	runner.Command = func(_ context.Context, env []string) error { received = env; return nil }
+	require.NoError(t, runner.Run(t.Context()))
+	assert.Equal(t, []string{"PGSERVICE=pg-tunnel"}, received)
 }
 
 func TestStartupFailuresCleanOwnedResources(t *testing.T) {
@@ -349,5 +360,43 @@ func TestPasswordRotationVerifiesBeforePublishingAndRetainsPreviousOnFailure(t *
 		cancel()
 		require.NoError(t, <-result)
 		assert.Equal(t, []string{"client closed", "tunnel closed"}, *events)
+	})
+}
+
+func TestCredentialFormattingIsRedacted(t *testing.T) {
+	t.Parallel()
+	credential := session.Credential{Secret: "never-log-this"}
+	for _, format := range []string{"%s", "%v", "%+v", "%#v"} {
+		assert.NotContains(t, fmt.Sprintf(format, credential), credential.Secret)
+	}
+}
+
+func TestNearlyExpiredAWSCredentialsDoNotCauseRapidRenewal(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		runner, _, _, _ := fixture()
+		// IAM tokens cannot outlive the AWS credentials that signed them.
+		awsExpiry := time.Now().Add(2 * time.Minute)
+		var mu sync.Mutex
+		calls := 0
+		runner.Auth = authFunc(func(context.Context, session.Target) (session.Credential, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			calls++
+			return session.Credential{Secret: fmt.Sprintf("token-%d", calls), ExpiresAt: awsExpiry}, nil
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		runner.Command = func(ctx context.Context, _ []string) error { <-ctx.Done(); return nil }
+		result := make(chan error, 1)
+		go func() { result <- runner.Run(ctx) }()
+		synctest.Wait()
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		mu.Lock()
+		assert.Equal(t, 3, calls, "startup plus one renewal every 30 seconds")
+		mu.Unlock()
+		cancel()
+		require.NoError(t, <-result)
 	})
 }

@@ -152,31 +152,52 @@ func tunnelError(err error) error {
 	return err
 }
 
+const (
+	passwordPoll   = 5 * time.Minute
+	renewalMargin  = 3 * time.Minute
+	minimumRenewal = 30 * time.Second
+	// Monotonic timers pause while macOS sleeps, so waits are re-checked against the wall clock.
+	wallClockCheck = time.Minute
+)
+
 func (r *Runner) refresh(ctx context.Context, target Target, port int, client Client, current Credential) {
-	delay := renewalDelay(current)
+	due := renewalTime(current)
 	backoff := 5 * time.Second
 	for {
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		if !sleepUntil(ctx, due) {
 			return
-		case <-timer.C:
 		}
 		next, err := r.renew(ctx, target, port, client, current)
 		if ctx.Err() != nil {
 			return
 		}
 		if err != nil {
-			delay = backoff
+			due = time.Now().Round(0).Add(backoff)
+			r.report(fmt.Sprintf("Credential refresh failed: %v. %s Retry in %s.", err, credentialValidity(current), backoff))
 			backoff = min(backoff*2, time.Minute)
-			r.report(fmt.Sprintf("Credential refresh failed: %v. %s Retry in %s.", err, credentialValidity(current), delay))
 			continue
 		}
 		current = next
 		backoff = 5 * time.Second
-		delay = renewalDelay(current)
+		due = renewalTime(current)
 		r.reportExpiry(current)
+	}
+}
+
+// sleepUntil waits for a wall-clock deadline and reports whether it was reached.
+func sleepUntil(ctx context.Context, due time.Time) bool {
+	for {
+		wait := time.Until(due)
+		if wait <= 0 {
+			return true
+		}
+		timer := time.NewTimer(min(wait, wallClockCheck))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		case <-timer.C:
+		}
 	}
 }
 
@@ -199,11 +220,17 @@ func (r *Runner) renew(ctx context.Context, target Target, port int, client Clie
 	return credential, nil
 }
 
-func renewalDelay(credential Credential) time.Duration {
+// renewalTime has no monotonic reading, so comparisons use the wall clock.
+func renewalTime(credential Credential) time.Time {
+	now := time.Now().Round(0)
 	if credential.ExpiresAt.IsZero() {
-		return 5 * time.Minute
+		return now.Add(passwordPoll)
 	}
-	return max(time.Until(credential.ExpiresAt.Add(-3*time.Minute)), time.Second)
+	earliest := now.Add(minimumRenewal)
+	if renewal := credential.ExpiresAt.Round(0).Add(-renewalMargin); renewal.After(earliest) {
+		return renewal
+	}
+	return earliest
 }
 
 func (r *Runner) report(message string) {
@@ -214,10 +241,10 @@ func (r *Runner) report(message string) {
 
 func (r *Runner) reportExpiry(credential Credential) {
 	if credential.ExpiresAt.IsZero() {
-		r.report("Secrets Manager password loaded; expiry is not reported. Checking for rotation every 5m0s. New connections may fail between rotation and refresh.")
+		r.report(fmt.Sprintf("Secrets Manager password loaded; expiry is not reported. Checking for rotation every %s. New connections may fail between rotation and refresh.", passwordPoll))
 		return
 	}
-	r.report(fmt.Sprintf("IAM token expires %s; refresh in %s. Token expiry does not close established connections.", credential.ExpiresAt.Format(time.RFC3339), renewalDelay(credential).Round(time.Second)))
+	r.report(fmt.Sprintf("IAM token expires %s; refresh in %s. Token expiry does not close established connections.", credential.ExpiresAt.Format(time.RFC3339), time.Until(renewalTime(credential)).Round(time.Second)))
 }
 
 func credentialValidity(credential Credential) string {

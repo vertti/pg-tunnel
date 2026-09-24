@@ -11,8 +11,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 // Group owns a subprocess, all of its descendants, and its exit result.
@@ -34,14 +32,31 @@ func Start(ctx context.Context, args, env []string, stdin io.Reader, stdout, std
 	cmd := exec.CommandContext(context.WithoutCancel(ctx), args[0], args[1:]...) //nolint:gosec // Executing the explicitly requested client or trusted transport is the purpose of this utility.
 	cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = env, stdin, stdout, stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	restore := terminalControl(cmd, stdin)
 	cmd.WaitDelay = 3 * time.Second
+	term := handover(cmd, stdin)
+	if term == nil {
+		return start(cmd, func(int) {})
+	}
+	sigchld := make(chan os.Signal, 1)
+	signal.Notify(sigchld, syscall.SIGCHLD)
+	group, err := start(cmd, term.restore)
+	if err != nil {
+		signal.Stop(sigchld)
+		return nil, err
+	}
+	go func() {
+		defer signal.Stop(sigchld)
+		term.followStops(cmd.Process.Pid, sigchld, group.done)
+	}()
+	return group, nil
+}
+
+func start(cmd *exec.Cmd, restore func(child int)) (*Group, error) {
 	if err := cmd.Start(); err != nil {
-		restore()
-		return nil, fmt.Errorf("start %s: %w", args[0], err)
+		return nil, fmt.Errorf("start %s: %w", cmd.Args[0], err)
 	}
 	group := &Group{cmd: cmd, done: make(chan struct{})}
-	go func() { group.err = cmd.Wait(); restore(); close(group.done) }()
+	go func() { group.err = cmd.Wait(); restore(cmd.Process.Pid); close(group.done) }()
 	return group, nil
 }
 
@@ -131,7 +146,7 @@ func ExitCode(err error) int {
 func SignalContext(parent context.Context) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancelCause(parent)
 	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
 		select {
 		case received := <-ch:
@@ -148,22 +163,3 @@ type signalError struct{ signal syscall.Signal }
 
 func (s *signalError) Error() string { return "received " + s.signal.String() }
 func (*signalError) Unwrap() error   { return context.Canceled }
-
-func terminalControl(cmd *exec.Cmd, stdin io.Reader) func() {
-	file, ok := stdin.(*os.File)
-	if !ok {
-		return func() {}
-	}
-	fd := int(file.Fd())
-	foreground, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP)
-	if err != nil {
-		return func() {}
-	}
-	cmd.SysProcAttr.Foreground, cmd.SysProcAttr.Ctty = true, fd
-	return func() {
-		// The supervisor is in the background while handing the terminal back.
-		signal.Ignore(syscall.SIGTTOU)
-		_ = unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, foreground) //nolint:errcheck // Terminal removal during child exit cannot be repaired; all process cleanup must still proceed.
-		signal.Reset(syscall.SIGTTOU)
-	}
-}

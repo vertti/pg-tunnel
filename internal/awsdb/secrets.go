@@ -14,9 +14,14 @@ import (
 	"github.com/vertti/pg-tunnel/internal/session"
 )
 
+// SecretsAPI reads the selected secret version.
+type SecretsAPI interface {
+	GetSecretValue(context.Context, *secretsmanager.GetSecretValueInput, ...func(*secretsmanager.Options)) (*secretsmanager.GetSecretValueOutput, error)
+}
+
 // Secrets retrieves passwords from an explicitly selected Secrets Manager secret.
 type Secrets struct {
-	API *secretsmanager.Client
+	API SecretsAPI
 	ID  string
 }
 
@@ -67,7 +72,7 @@ func passwordCredential(value string, target session.Target) (session.Credential
 }
 
 func (secret *databaseSecret) validateEndpoint(target session.Target) error {
-	if secret.Engine != "" && secret.Engine != "postgres" {
+	if secret.Engine != "" && !PostgreSQLEngine(secret.Engine) {
 		return errors.New("secret engine is not postgres")
 	}
 	if secret.Host != "" && !strings.EqualFold(strings.TrimSuffix(secret.Host, "."), strings.TrimSuffix(target.Host, ".")) {

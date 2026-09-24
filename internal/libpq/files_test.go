@@ -1,7 +1,6 @@
 package libpq_test
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,7 +11,9 @@ import (
 	"github.com/jackc/pgpassfile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
+	"github.com/vertti/pg-tunnel/internal/atomicfile"
 	"github.com/vertti/pg-tunnel/internal/libpq"
 	"github.com/vertti/pg-tunnel/internal/session"
 )
@@ -81,7 +82,9 @@ func TestConcurrentSessionsAndAbandonedRecovery(t *testing.T) {
 	stale := filepath.Join(root, "session-abandoned")
 	require.NoError(t, os.Mkdir(stale, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(stale, "pgpass"), []byte("stale secret"), 0o600))
-	require.NoError(t, factory.Recover())
+	removed, err := factory.Recover()
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed, "live sessions are kept")
 	_, err = os.Stat(stale)
 	require.ErrorIs(t, err, os.ErrNotExist)
 	for _, client := range []session.Client{first, second} {
@@ -121,12 +124,53 @@ func TestUnsafeStorageAndSettingsRejected(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
-func TestCredentialFormattingIsRedacted(t *testing.T) {
+func TestRecoveryWaitsForStorageLock(t *testing.T) {
 	t.Parallel()
-	credential := session.Credential{Secret: "never-log-this"}
-	for _, format := range []string{"%s", "%v", "%+v", "%#v"} {
-		assert.NotContains(t, fmt.Sprintf(format, credential), credential.Secret)
+	root := filepath.Join(t.TempDir(), "sessions")
+	require.NoError(t, os.Mkdir(root, 0o700))
+	holder, err := os.Open(root) //nolint:gosec // The directory is inside t.TempDir.
+	require.NoError(t, err)
+	require.NoError(t, unix.Flock(int(holder.Fd()), unix.LOCK_EX))
+	recovered := make(chan error, 1)
+	go func() { _, recoverErr := (libpq.Files{Root: root}).Recover(); recovered <- recoverErr }()
+	select {
+	case <-recovered:
+		t.Fatal("recovery ran while another session held the storage lock")
+	case <-time.After(100 * time.Millisecond):
 	}
+	require.NoError(t, holder.Close())
+	select {
+	case err = <-recovered:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("recovery did not resume after the lock was released")
+	}
+}
+
+func TestStorageMustBeARealDirectory(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	target := filepath.Join(directory, "real")
+	require.NoError(t, os.Mkdir(target, 0o700))
+	link := filepath.Join(directory, "link")
+	require.NoError(t, os.Symlink(target, link))
+	_, err := (libpq.Files{Root: link}).Recover()
+	require.ErrorContains(t, err, "real directory")
+	file := filepath.Join(directory, "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+	_, err = (libpq.Files{Root: file}).Recover()
+	require.ErrorContains(t, err, "create session storage")
+}
+
+func TestTLSConfigRequiresReadableCertificates(t *testing.T) {
+	t.Parallel()
+	missing := filepath.Join(t.TempDir(), "missing.pem")
+	_, err := libpq.TLSConfig(session.Target{RootCert: missing})
+	require.ErrorIs(t, err, os.ErrNotExist)
+	empty := filepath.Join(t.TempDir(), "empty.pem")
+	require.NoError(t, os.WriteFile(empty, []byte("no certificates"), 0o600))
+	_, err = libpq.TLSConfig(session.Target{RootCert: empty})
+	require.ErrorContains(t, err, "no usable PEM")
 }
 
 func TestRecoveryAfterSIGKILL(t *testing.T) {
@@ -148,12 +192,16 @@ func TestRecoveryAfterSIGKILL(t *testing.T) {
 	data, err := os.ReadFile(marker) //nolint:gosec // The marker is written by the test child in t.TempDir.
 	require.NoError(t, err)
 	dir := string(data)
-	require.NoError(t, (libpq.Files{Root: root}).Recover())
+	removed, err := (libpq.Files{Root: root}).Recover()
+	require.NoError(t, err)
+	assert.Zero(t, removed)
 	_, err = os.Stat(dir) //nolint:gosec // This path comes from the test child running under t.TempDir.
 	require.NoError(t, err, "a live owner's credentials must be retained")
 	require.NoError(t, child.Process.Kill())
 	require.Error(t, child.Wait())
-	require.NoError(t, (libpq.Files{Root: root}).Recover())
+	removed, err = (libpq.Files{Root: root}).Recover()
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
 	_, err = os.Stat(dir) //nolint:gosec // This path comes from the test child running under t.TempDir.
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
@@ -168,6 +216,6 @@ func TestCredentialOwnerHelper(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	dir := filepath.Dir(envValue(client.Env(nil), "PGPASSFILE"))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "ready"), []byte(dir), 0o600)) //nolint:gosec // The parent supplies its t.TempDir path to this subprocess fixture.
+	require.NoError(t, atomicfile.Write(filepath.Join(root, "ready"), []byte(dir)))
 	time.Sleep(time.Hour)
 }

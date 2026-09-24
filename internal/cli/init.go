@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -18,6 +17,10 @@ import (
 func initProfile(ctx context.Context, args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
 	flags.SetOutput(output)
+	flags.Usage = func() {
+		fmt.Fprintln(output, "Usage: pg-tunnel init [--aws-profile PROFILE] [--region REGION] [--config PATH] [--sslrootcert PEM]") //nolint:errcheck // flag.Usage has no error return.
+		flags.PrintDefaults()
+	}
 	var p profile.Profile
 	flags.StringVar(&p.RootCert, "sslrootcert", "", "optional custom CA PEM file (default: automatically managed AWS RDS bundle)")
 	flags.StringVar(&p.Region, "region", "", "AWS region (defaults to AWS configuration)")
@@ -28,10 +31,10 @@ func initProfile(ctx context.Context, args []string, output io.Writer) error {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return fmt.Errorf("parse setup options: %w", err)
+		return fmt.Errorf("%w: %w", ErrUsage, err)
 	}
 	if flags.NArg() != 0 {
-		return ErrUsage
+		return usageError("init takes no arguments; pass the AWS profile with --aws-profile")
 	}
 	if *path == "" {
 		var err error
@@ -41,7 +44,7 @@ func initProfile(ctx context.Context, args []string, output io.Writer) error {
 		}
 	}
 	// /dev/tty is not supported by Go's poller on every platform. Read it
-	// nonblocking and wait with poll so cancellation never depends on Close.
+	// nonblocking and wait with select so cancellation never depends on Close.
 	terminal, err := unix.Open("/dev/tty", unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return fmt.Errorf("interactive setup needs a terminal: %w", err)
@@ -55,7 +58,7 @@ func initProfile(ctx context.Context, args []string, output io.Writer) error {
 	}
 	wizard := setup.Wizard{Input: terminalInput{fd: terminal, done: ctx.Done()}, Output: output, Config: cfg, AWSProfile: p.AWSProfile, RootCert: p.RootCert, Path: *path}
 	wizard.Verify = func(verifyCtx context.Context, candidate *profile.Profile) error {
-		return execute(verifyCtx, candidate, func(context.Context, []string) error { return nil }, log.New(output, "pg-tunnel: ", 0))
+		return execute(verifyCtx, candidate, func(context.Context, []string) error { return nil }, reporter(output))
 	}
 	if err = wizard.Run(ctx); err != nil {
 		return fmt.Errorf("initialize profile: %w", err)
@@ -71,14 +74,16 @@ type terminalInput struct {
 }
 
 func (input terminalInput) Read(buffer []byte) (int, error) {
-	descriptors := []unix.PollFd{{Fd: int32(input.fd), Events: unix.POLLIN}} //nolint:gosec // Unix file descriptors are signed C ints.
 	for {
 		select {
 		case <-input.done:
 			return 0, context.Canceled
 		default:
 		}
-		if _, err := unix.Poll(descriptors, 100); err != nil {
+		// macOS poll reports /dev/tty as always ready, which would spin; select does not.
+		var readable unix.FdSet
+		readable.Set(input.fd)
+		if _, err := unix.Select(input.fd+1, &readable, nil, nil, &unix.Timeval{Usec: 100_000}); err != nil {
 			if errors.Is(err, unix.EINTR) {
 				continue
 			}

@@ -3,7 +3,6 @@ package cli_test
 import (
 	"bytes"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,32 +10,70 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/vertti/pg-tunnel/internal/cli"
-	"github.com/vertti/pg-tunnel/internal/profile"
 )
 
 func TestVersion(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	require.NoError(t, cli.Run([]string{"--version"}, &output))
+	require.NoError(t, cli.RunContext(t.Context(), []string{"--version"}, &output))
 	assert.Equal(t, "pg-tunnel dev\n", output.String())
 }
 
 func TestHelp(t *testing.T) {
 	t.Parallel()
 
-	var output bytes.Buffer
-	require.NoError(t, cli.Run([]string{"--help"}, &output))
-	assert.Contains(t, output.String(), "Usage: pg-tunnel run")
-	assert.Contains(t, output.String(), "-version")
+	for _, args := range [][]string{{"--help"}, {"help"}} {
+		var output bytes.Buffer
+		require.NoError(t, cli.RunContext(t.Context(), args, &output))
+		for _, want := range []string{"pg-tunnel run [--config PATH] CONNECTION -- COMMAND", "pg-tunnel connect", "pg-tunnel init", "pg-tunnel cleanup", "-version"} {
+			assert.Contains(t, output.String(), want)
+		}
+	}
+}
+
+func TestUsageMistakesExplainTheFix(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		want string
+		args []string
+	}{
+		{"missing command", nil},
+		{`unknown command "bogus"`, []string{"bogus"}},
+		{"connect needs a CONNECTION name", []string{"connect"}},
+		{"put -- between the connection name and the command: pg-tunnel run dev -- psql", []string{"run", "dev", "psql"}},
+		{"run needs a command", []string{"run", "dev"}},
+		{"missing command after --", []string{"run", "dev", "--"}},
+		{"put --config before the connection name", []string{"connect", "dev", "--config", "other.json"}},
+		{"connect takes only a CONNECTION name", []string{"connect", "dev", "extra"}},
+		{"cleanup takes no arguments", []string{"cleanup", "extra"}},
+		{"init takes no arguments", []string{"init", "dev"}},
+		{`unexpected argument "extra"`, []string{"--version", "extra"}},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			t.Parallel()
+			var output bytes.Buffer
+			err := cli.RunContext(t.Context(), tc.args, &output)
+			require.ErrorIs(t, err, cli.ErrUsage)
+			require.ErrorContains(t, err, tc.want)
+			assert.Empty(t, output.String())
+		})
+	}
+}
+
+func TestRunChecksCommandBeforeConnecting(t *testing.T) {
+	t.Parallel()
+	err := cli.RunContext(t.Context(), []string{"run", "--config", "/nonexistent/pg-tunnel.json", "dev", "--", "pg-tunnel-missing-command"}, &bytes.Buffer{})
+	require.ErrorContains(t, err, "find command before connecting")
+	require.NotErrorIs(t, err, cli.ErrUsage)
 }
 
 func TestUnknownOption(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	err := cli.Run([]string{"--unknown"}, &output)
-	require.ErrorContains(t, err, "parse options:")
+	err := cli.RunContext(t.Context(), []string{"--unknown"}, &output)
+	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Contains(t, output.String(), "flag provided but not defined")
 }
 
@@ -48,7 +85,7 @@ func TestIncompleteCommands(t *testing.T) {
 			t.Parallel()
 
 			var output bytes.Buffer
-			require.ErrorIs(t, cli.Run(args, &output), cli.ErrUsage)
+			require.ErrorIs(t, cli.RunContext(t.Context(), args, &output), cli.ErrUsage)
 			assert.Empty(t, output.String())
 		})
 	}
@@ -58,7 +95,7 @@ func TestOutputFailure(t *testing.T) {
 	t.Parallel()
 
 	failure := errors.New("output unavailable")
-	err := cli.Run([]string{"--version"}, failingWriter{err: failure})
+	err := cli.RunContext(t.Context(), []string{"--version"}, failingWriter{err: failure})
 	require.ErrorIs(t, err, failure)
 }
 
@@ -76,7 +113,7 @@ func TestEmptyExplicitConfigIsRejected(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			var output bytes.Buffer
-			err := cli.Run([]string{mode, "--config=", "dev"}, &output)
+			err := cli.RunContext(t.Context(), []string{mode, "--config=", "dev"}, &output)
 			require.ErrorContains(t, err, "--config requires a non-empty path")
 		})
 	}
@@ -85,26 +122,12 @@ func TestEmptyExplicitConfigIsRejected(t *testing.T) {
 func TestInitHelpRequiresNeitherTerminalNorAWS(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
-	require.NoError(t, cli.Run([]string{"init", "--help"}, &output))
+	require.NoError(t, cli.RunContext(t.Context(), []string{"init", "--help"}, &output))
 	assert.Contains(t, output.String(), "-region")
 	assert.Contains(t, output.String(), "-aws-profile")
 	assert.Contains(t, output.String(), "\n  -profile string\n")
 	assert.Contains(t, output.String(), "-config")
 	for _, option := range []string{"--profile", "--aws-profile"} {
-		require.ErrorIs(t, cli.Run([]string{"init", option, "dev", "unexpected"}, &output), cli.ErrUsage)
-	}
-}
-
-func TestProductionWarningBeforeConnection(t *testing.T) {
-	t.Setenv("AWS_CONFIG_FILE", filepath.Join(t.TempDir(), "missing"))
-	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "missing"))
-	for _, environment := range []string{"production", "staging", "development", ""} {
-		path := filepath.Join(t.TempDir(), "config.json")
-		p := profile.Profile{Environment: environment, DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432, AWSProfile: "missing-test-profile"}
-		require.NoError(t, profile.Save(path, "test", &p))
-		var output bytes.Buffer
-		err := cli.Run([]string{"connect", "--config", path, "test"}, &output)
-		require.ErrorContains(t, err, "load AWS configuration")
-		assert.Equal(t, environment == "production", strings.Contains(output.String(), "WARNING: PRODUCTION"))
+		require.ErrorIs(t, cli.RunContext(t.Context(), []string{"init", option, "dev", "unexpected"}, &output), cli.ErrUsage)
 	}
 }

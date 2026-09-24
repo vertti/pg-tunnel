@@ -17,6 +17,8 @@ func main() {
 }
 
 func run() int {
+	log.SetFlags(0)
+	log.SetPrefix("pg-tunnel: ")
 	if len(os.Args) > 1 && os.Args[1] == ssmplugin.Command {
 		if err := ssmplugin.Run(os.Args[2:], os.Stdout); err != nil {
 			log.Print(err)
@@ -28,6 +30,9 @@ func run() int {
 	defer stop()
 	if err := cli.RunContext(ctx, os.Args[1:], os.Stderr); err != nil {
 		log.Print(err)
+		if errors.Is(err, cli.ErrUsage) {
+			return 2
+		}
 		return process.ExitCode(errors.Join(err, context.Cause(ctx)))
 	}
 	return 0

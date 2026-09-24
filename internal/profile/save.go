@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/vertti/pg-tunnel/internal/atomicfile"
 )
 
 // UserPath returns the shared configuration location, whether or not it exists.
@@ -49,6 +50,10 @@ func Save(path, name string, p *Profile) error {
 		return fmt.Errorf("profile %q already exists in %s; choose a different name or edit the file manually", name, path)
 	}
 	profiles[name] = *p
+	return writeConfig(path, profiles)
+}
+
+func writeConfig(path string, profiles map[string]Profile) error {
 	data, err := json.MarshalIndent(configuration{Profiles: profiles}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode profiles: %w", err)
@@ -56,7 +61,10 @@ func Save(path, name string, p *Profile) error {
 	if len(data) >= 1<<20 {
 		return errors.New("updated configuration exceeds the 1 MiB size limit")
 	}
-	return replaceConfig(path, append(data, '\n'))
+	if err = atomicfile.Write(path, append(data, '\n')); err != nil {
+		return fmt.Errorf("save configuration: %w", err)
+	}
+	return nil
 }
 
 func profilesToSave(path string) (map[string]Profile, error) {
@@ -80,29 +88,9 @@ func profilesToSave(path string) (map[string]Profile, error) {
 	return config.Profiles, nil
 }
 
-func replaceConfig(path string, data []byte) (result error) {
-	file, err := os.CreateTemp(filepath.Dir(path), ".pg-tunnel-*")
-	if err != nil {
-		return fmt.Errorf("create configuration replacement: %w", err)
-	}
-	defer func() {
-		if removeErr := os.Remove(file.Name()); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			result = errors.Join(result, fmt.Errorf("remove temporary configuration: %w", removeErr))
-		}
-	}()
-	_, writeErr := file.Write(data)
-	if err = errors.Join(writeErr, file.Sync(), file.Close()); err != nil {
-		return fmt.Errorf("write configuration replacement: %w", err)
-	}
-	if err = os.Rename(file.Name(), path); err != nil {
-		return fmt.Errorf("save configuration: %w", err)
-	}
-	return nil
-}
-
 func validateName(name string) error {
-	if name == "" || strings.ContainsAny(name, "\r\n\x00") || name != strings.TrimSpace(name) {
-		return errors.New("profile name must be non-empty with no line breaks, NULs, or surrounding whitespace")
+	if name == "" || !plainText(name) {
+		return errors.New("profile name must be non-empty UTF-8 without control characters or surrounding whitespace")
 	}
 	return nil
 }
