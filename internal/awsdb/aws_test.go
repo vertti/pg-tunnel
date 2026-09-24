@@ -271,6 +271,17 @@ func TestIAMReportsCredentialExpiryKnowledge(t *testing.T) {
 	}
 }
 
+func TestAuroraPostgreSQLInstancesAreSupported(t *testing.T) {
+	t.Parallel()
+	api := rdsFunc(func(context.Context, *rds.DescribeDBInstancesInput) (*rds.DescribeDBInstancesOutput, error) {
+		return &rds.DescribeDBInstancesOutput{DBInstances: []rdstypes.DBInstance{{Engine: aws.String("aurora-postgresql"), IAMDatabaseAuthenticationEnabled: aws.Bool(true), Endpoint: &rdstypes.Endpoint{Address: aws.String("aurora.rds.amazonaws.com"), Port: aws.Int32(5432)}}}}, nil
+	})
+	target, err := (&awsdb.Resolver{API: api, Profile: &profile.Profile{DBInstance: "example"}}).Resolve(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "aurora.rds.amazonaws.com", target.Host)
+	assert.False(t, awsdb.PostgreSQLEngine("aurora-mysql"))
+}
+
 func TestRDSDiscoveryRejectsUnusableInstances(t *testing.T) {
 	t.Parallel()
 	address := aws.String("real.rds.amazonaws.com")
@@ -281,7 +292,7 @@ func TestRDSDiscoveryRejectsUnusableInstances(t *testing.T) {
 	}{
 		{name: "API failure", err: errors.New("AccessDenied"), want: "rds:DescribeDBInstances permission"},
 		{name: "no instance", want: "found 0"},
-		{name: "other engine", instances: []rdstypes.DBInstance{{Engine: aws.String("mysql")}}, want: "RDS PostgreSQL"},
+		{name: "other engine", instances: []rdstypes.DBInstance{{Engine: aws.String("mysql")}}, want: "Aurora PostgreSQL instances are supported"},
 		{name: "no endpoint", instances: []rdstypes.DBInstance{{Engine: aws.String("postgres"), IAMDatabaseAuthenticationEnabled: aws.Bool(true)}}, want: "usable database endpoint"},
 		{name: "endpoint without port", instances: []rdstypes.DBInstance{{Engine: aws.String("postgres"), IAMDatabaseAuthenticationEnabled: aws.Bool(true), Endpoint: &rdstypes.Endpoint{Address: address}}}, want: "usable database endpoint"},
 	} {

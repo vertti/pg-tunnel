@@ -2,7 +2,6 @@ package process_test
 
 import (
 	"bytes"
-	"errors"
 	"flag"
 	"os"
 	"os/exec"
@@ -16,9 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/vertti/pg-tunnel/internal/process"
+	"github.com/vertti/pg-tunnel/internal/ptytest"
 )
-
-func errorsJoinClose(err error, file *os.File) error { return errors.Join(err, file.Close()) }
 
 // A job-control shell runs the supervisor; its child stops while holding the
 // terminal, as psql does on Ctrl-Z. The shell must regain control, and fg must
@@ -28,7 +26,7 @@ func TestStoppedChildReturnsTerminalToShell(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash provides the job-control shell")
 	}
-	primary, replicaName, err := openPTY()
+	primary, replicaName, err := ptytest.Open()
 	require.NoError(t, err)
 	defer primary.Close()                                                   //nolint:errcheck // Test cleanup of the terminal primary.
 	replica, err := os.OpenFile(replicaName, os.O_RDWR|syscall.O_NOCTTY, 0) //nolint:gosec // The path names the pseudo-terminal opened above.

@@ -72,7 +72,7 @@ func passwordCredential(value string, target session.Target) (session.Credential
 }
 
 func (secret *databaseSecret) validateEndpoint(target session.Target) error {
-	if secret.Engine != "" && secret.Engine != "postgres" {
+	if secret.Engine != "" && !PostgreSQLEngine(secret.Engine) {
 		return errors.New("secret engine is not postgres")
 	}
 	if secret.Host != "" && !strings.EqualFold(strings.TrimSuffix(secret.Host, "."), strings.TrimSuffix(target.Host, ".")) {

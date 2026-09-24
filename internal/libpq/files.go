@@ -36,7 +36,7 @@ func (f Files) Prepare(target session.Target, port int, credential session.Crede
 		return nil, err
 	}
 	defer root.Close() //nolint:errcheck // Closing this read-only directory only releases its advisory lock.
-	if recoveryErr := recoverSessions(f.Root); recoveryErr != nil {
+	if _, recoveryErr := recoverSessions(f.Root); recoveryErr != nil {
 		return nil, recoveryErr
 	}
 	dir, err := os.MkdirTemp(f.Root, "session-")
@@ -100,11 +100,12 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// Recover removes abandoned session directories, skipping live locked sessions.
-func (f Files) Recover() error {
+// Recover removes abandoned session directories, skipping live locked sessions,
+// and reports how many it removed.
+func (f Files) Recover() (int, error) {
 	root, err := f.rootLock()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer root.Close() //nolint:errcheck // Closing this read-only directory only releases its advisory lock.
 	return recoverSessions(f.Root)
@@ -142,10 +143,10 @@ func lockDirectory(dir string) (*os.File, error) {
 	return file, nil
 }
 
-func recoverSessions(root string) error {
+func recoverSessions(root string) (removed int, _ error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return fmt.Errorf("list abandoned sessions: %w", err)
+		return 0, fmt.Errorf("list abandoned sessions: %w", err)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "session-") {
@@ -157,13 +158,14 @@ func recoverSessions(root string) error {
 			continue
 		}
 		if lockErr != nil {
-			return lockErr
+			return removed, lockErr
 		}
 		if err = errors.Join(os.RemoveAll(dir), lock.Close()); err != nil {
-			return fmt.Errorf("remove abandoned session: %w", err)
+			return removed, fmt.Errorf("remove abandoned session: %w", err)
 		}
+		removed++
 	}
-	return nil
+	return removed, nil
 }
 
 func atomicWrite(dir, name, content string) error {

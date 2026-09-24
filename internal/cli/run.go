@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -24,11 +25,16 @@ import (
 	"github.com/vertti/pg-tunnel/internal/process"
 	"github.com/vertti/pg-tunnel/internal/profile"
 	"github.com/vertti/pg-tunnel/internal/session"
+	"github.com/vertti/pg-tunnel/internal/setup"
 )
 
 func runSession(ctx context.Context, mode string, args []string, output io.Writer) error {
 	flags := flag.NewFlagSet(mode, flag.ContinueOnError)
 	flags.SetOutput(output)
+	flags.Usage = func() {
+		fmt.Fprintln(output, "Usage: pg-tunnel "+sessionSyntax[mode]) //nolint:errcheck // flag.Usage has no error return.
+		flags.PrintDefaults()
+	}
 	var path string
 	flags.Func("config", "connection profiles (JSON); default: project pg-tunnel.json, then user configuration", func(value string) error {
 		if value == "" {
@@ -41,32 +47,58 @@ func runSession(ctx context.Context, mode string, args []string, output io.Write
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return fmt.Errorf("parse session options: %w", err)
+		return fmt.Errorf("%w: %w", ErrUsage, err)
 	}
-	remaining := flags.Args()
-	if len(remaining) == 0 {
-		return ErrUsage
+	name, command, err := sessionArguments(mode, flags.Args())
+	if err != nil {
+		return err
 	}
-	command := remaining[1:]
-	if mode == "run" {
-		if len(command) < 2 || command[0] != "--" {
-			return ErrUsage
+	if len(command) > 0 {
+		if _, err = exec.LookPath(command[0]); err != nil {
+			return fmt.Errorf("find command before connecting: %w", err)
 		}
-		command = command[1:]
-	} else if len(command) > 0 {
-		return ErrUsage
 	}
-	p, err := profile.Load(path, remaining[0])
+	p, err := profile.Load(path, name)
 	if err != nil {
 		return fmt.Errorf("load connection profile: %w", err)
 	}
 	report := reporter(output)
-	return execute(ctx, &p, sessionCommand(command, report), report)
+	return execute(ctx, &p, sessionCommand(command, os.Stdout, report), report)
 }
 
 func reporter(output io.Writer) func(string) {
 	logger := log.New(output, "pg-tunnel: ", 0)
 	return func(message string) { logger.Print(message) }
+}
+
+var sessionSyntax = map[string]string{
+	"run":     "run [--config PATH] CONNECTION -- COMMAND [ARGS...]",
+	"connect": "connect [--config PATH] CONNECTION",
+}
+
+func sessionArguments(mode string, args []string) (name string, command []string, err error) {
+	if len(args) == 0 {
+		return "", nil, usageError("%s needs a CONNECTION name: pg-tunnel %s", mode, sessionSyntax[mode])
+	}
+	name, rest := args[0], args[1:]
+	if len(rest) > 0 && strings.HasPrefix(rest[0], "--config") {
+		return "", nil, usageError("put --config before the connection name")
+	}
+	if mode == "connect" {
+		if len(rest) > 0 {
+			return "", nil, usageError("connect takes only a CONNECTION name")
+		}
+		return name, nil, nil
+	}
+	switch {
+	case len(rest) == 0:
+		return "", nil, usageError("run needs a command: pg-tunnel run %s -- psql", name)
+	case rest[0] != "--":
+		return "", nil, usageError("put -- between the connection name and the command: pg-tunnel run %s -- %s", name, strings.Join(rest, " "))
+	case len(rest) == 1:
+		return "", nil, usageError("missing command after --")
+	}
+	return name, rest[1:], nil
 }
 
 func execute(ctx context.Context, p *profile.Profile, command session.Command, report func(string)) error {
@@ -113,19 +145,25 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	return nil
 }
 
-func sessionCommand(command []string, report func(string)) session.Command {
+// sessionCommand runs command, or for connect prints shell exports of the client
+// settings to stdout and waits; stopping connect with a signal is a normal exit.
+func sessionCommand(command []string, stdout io.Writer, report func(string)) session.Command {
 	return func(ctx context.Context, env []string) error {
 		if len(command) > 0 {
 			return process.Run(ctx, command, env)
 		}
-		report("Client settings (keep this session running; Ctrl-C stops it):")
+		report("Client settings for other terminals follow; keep this session running (Ctrl-C closes it).")
 		for _, entry := range env {
-			if strings.HasPrefix(entry, "PG") {
-				report(entry)
+			name, value, _ := strings.Cut(entry, "=")
+			if !strings.HasPrefix(name, "PG") {
+				continue
+			}
+			if _, err := fmt.Fprintf(stdout, "export %s=%s\n", name, setup.ShellQuote(value)); err != nil {
+				return fmt.Errorf("write client settings: %w", err)
 			}
 		}
 		<-ctx.Done()
-		return fmt.Errorf("session stopped: %w", context.Cause(ctx))
+		return nil
 	}
 }
 
@@ -142,9 +180,20 @@ func awsConfig(ctx context.Context, p *profile.Profile) (aws.Config, error) {
 		return cfg, fmt.Errorf("load AWS configuration; check your profile or SSO login: %w", err)
 	}
 	if cfg.Region == "" {
-		return cfg, errors.New("AWS region is missing; set region in the connection profile or AWS_REGION")
+		return cfg, errors.New("AWS region is missing; set region in the AWS profile or connection, pass --region to init, or set AWS_REGION")
+	}
+	// Discovery errors would otherwise blame IAM permissions for a missing login.
+	if _, err = cfg.Credentials.Retrieve(ctx); err != nil {
+		return cfg, fmt.Errorf("no usable AWS credentials; %s: %w", loginHint(p.AWSProfile), err)
 	}
 	return cfg, nil
+}
+
+func loginHint(awsProfile string) string {
+	if awsProfile == "" {
+		return "log in to AWS first, for example with aws sso login --profile NAME, and select that profile with --aws-profile or aws_profile"
+	}
+	return "log in with aws sso login --profile " + awsProfile + " or renew that profile's credentials"
 }
 
 func environmentExpiry() (time.Time, error) {
@@ -167,13 +216,17 @@ func sessionRoot() (string, error) {
 	return filepath.Join(cache, "pg-tunnel", "sessions"), nil
 }
 
-func cleanup() error {
+func cleanup(output io.Writer) error {
 	root, err := sessionRoot()
 	if err != nil {
 		return err
 	}
-	if err = (libpq.Files{Root: root}).Recover(); err != nil {
+	removed, err := (libpq.Files{Root: root}).Recover()
+	if err != nil {
 		return fmt.Errorf("recover abandoned credentials: %w", err)
+	}
+	if _, err = fmt.Fprintf(output, "Removed %d abandoned session(s).\n", removed); err != nil {
+		return fmt.Errorf("write cleanup summary: %w", err)
 	}
 	return nil
 }
