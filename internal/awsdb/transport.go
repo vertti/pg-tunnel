@@ -174,7 +174,10 @@ func (t *tunnel) Close(ctx context.Context) error {
 		if t.sessionID == "" {
 			return
 		}
-		t.closeErr = errors.Join(t.closeErr, t.terminateRemote(ctx))
+		// Stopping the plugin can use most of the caller's budget.
+		remoteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		t.closeErr = errors.Join(t.closeErr, t.terminateRemote(remoteCtx))
 	})
 	return t.closeErr
 }

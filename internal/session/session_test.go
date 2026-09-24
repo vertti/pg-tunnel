@@ -360,3 +360,33 @@ func TestCredentialFormattingIsRedacted(t *testing.T) {
 		assert.NotContains(t, fmt.Sprintf(format, credential), credential.Secret)
 	}
 }
+
+func TestNearlyExpiredAWSCredentialsDoNotCauseRapidRenewal(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		runner, _, _, _ := fixture()
+		// IAM tokens cannot outlive the AWS credentials that signed them.
+		awsExpiry := time.Now().Add(2 * time.Minute)
+		var mu sync.Mutex
+		calls := 0
+		runner.Auth = authFunc(func(context.Context, session.Target) (session.Credential, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			calls++
+			return session.Credential{Secret: fmt.Sprintf("token-%d", calls), ExpiresAt: awsExpiry}, nil
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		runner.Command = func(ctx context.Context, _ []string) error { <-ctx.Done(); return nil }
+		result := make(chan error, 1)
+		go func() { result <- runner.Run(ctx) }()
+		synctest.Wait()
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		mu.Lock()
+		assert.Equal(t, 3, calls, "startup plus one renewal every 30 seconds")
+		mu.Unlock()
+		cancel()
+		require.NoError(t, <-result)
+	})
+}
