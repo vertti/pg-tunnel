@@ -31,6 +31,7 @@ if ! command -v initdb >/dev/null && command -v pg_config >/dev/null; then
   export PATH="$(pg_config --bindir):$PATH"
 fi
 go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out | awk -v floor=87 '/^total:/ { sub("%", "", $3); print "coverage " $3 "% (floor " floor "%)"; if ($3 + 0 < floor) exit 1 }'
 """
 
 [tasks.build]

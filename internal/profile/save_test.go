@@ -67,3 +67,30 @@ func TestSaveRefusesUnsafeDestinations(t *testing.T) {
 	require.ErrorContains(t, profile.Save(path, "dev", &p), "retry after the other setup")
 	assert.NoFileExists(t, path)
 }
+
+func TestSaveRejectsInvalidInputBeforeWriting(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	path := filepath.Join(directory, "profiles.json")
+	valid := profile.Profile{DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432}
+	for _, name := range []string{"", " padded", "line\nbreak"} {
+		require.ErrorContains(t, profile.Save(path, name, &valid), "profile name")
+	}
+	require.ErrorContains(t, profile.Save(path, "dev", &profile.Profile{}), "validate profile to save")
+	blocker := filepath.Join(directory, "file")
+	require.NoError(t, os.WriteFile(blocker, nil, 0o600))
+	require.ErrorContains(t, profile.Save(filepath.Join(blocker, "profiles.json"), "dev", &valid), "create configuration directory")
+	assert.NoFileExists(t, path)
+}
+
+func TestSaveRefusesToGrowPastSizeLimit(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	content := `{"profiles":{"large":{"database":"` + strings.Repeat("x", (1<<20)-200) + `"}}}`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	p := profile.Profile{DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432}
+	require.ErrorContains(t, profile.Save(path, "dev", &p), "exceeds the 1 MiB size limit")
+	actual, err := os.ReadFile(path) //nolint:gosec // The path is inside t.TempDir.
+	require.NoError(t, err)
+	assert.Equal(t, content, string(actual))
+}

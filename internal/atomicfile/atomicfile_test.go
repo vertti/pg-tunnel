@@ -32,8 +32,13 @@ func TestWriteReplacesPrivatelyWithoutTemporaryFiles(t *testing.T) {
 func TestWriteFailureLeavesNoTemporaryFile(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
-	require.Error(t, atomicfile.Write(directory, []byte("data")))
+	occupied := filepath.Join(directory, "occupied")
+	require.NoError(t, os.Mkdir(occupied, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(occupied, "keep"), nil, 0o600))
+	require.ErrorContains(t, atomicfile.Write(occupied, []byte("data")), "replace")
 	entries, err := os.ReadDir(directory)
 	require.NoError(t, err)
-	assert.Empty(t, entries)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "occupied", entries[0].Name())
+	require.ErrorContains(t, atomicfile.Write(filepath.Join(directory, "missing", "file"), nil), "create temporary file")
 }
