@@ -67,6 +67,7 @@ func TestLoadConfigurationPrecedence(t *testing.T) {
 			value, loadErr := profile.Load("", "dev")
 			require.NoError(t, loadErr)
 			assert.Equal(t, filepath.Join(filepath.Dir(userPath), "ca.pem"), value.RootCert)
+			assert.False(t, value.Project)
 		})
 	}
 
@@ -74,6 +75,7 @@ func TestLoadConfigurationPrecedence(t *testing.T) {
 	value, err := profile.Load("", "dev")
 	require.NoError(t, err)
 	assert.Equal(t, "project-reader", value.User)
+	assert.True(t, value.Project)
 	assert.Equal(t, filepath.Join(directory, "ca.pem"), value.RootCert)
 
 	explicitPath := filepath.Join(directory, "explicit.json")
@@ -81,6 +83,7 @@ func TestLoadConfigurationPrecedence(t *testing.T) {
 	value, err = profile.Load(explicitPath, "dev")
 	require.NoError(t, err)
 	assert.Equal(t, "explicit-reader", value.User)
+	assert.False(t, value.Project)
 	_, err = profile.Load(filepath.Join(directory, "missing.json"), "dev")
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
