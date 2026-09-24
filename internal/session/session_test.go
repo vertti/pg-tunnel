@@ -75,6 +75,16 @@ func fixture() (session.Runner, *fakeTunnel, *fakeClient, *[]string) {
 	return runner, tunnel, client, &events
 }
 
+func TestCommandReceivesClientEnvironment(t *testing.T) {
+	t.Parallel()
+	runner, _, _, _ := fixture()
+	runner.Env = []string{"PGPASSWORD=inherited"}
+	var received []string
+	runner.Command = func(_ context.Context, env []string) error { received = env; return nil }
+	require.NoError(t, runner.Run(t.Context()))
+	assert.Equal(t, []string{"PGSERVICE=pg-tunnel"}, received)
+}
+
 func TestStartupFailuresCleanOwnedResources(t *testing.T) {
 	t.Parallel()
 	for _, stage := range []string{"resolve", "transport", "auth", "verify", "client", "command"} {

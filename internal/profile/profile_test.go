@@ -179,6 +179,20 @@ func TestExplicitAuthenticationConfiguration(t *testing.T) {
 	}
 }
 
+func TestPasswordFileWildcardsAreRejected(t *testing.T) {
+	t.Parallel()
+	base := profile.Profile{DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432}
+	for name, edit := range map[string]func(*profile.Profile){
+		"database": func(p *profile.Profile) { p.Database = "*" },
+		"user":     func(p *profile.Profile) { p.User = "*" },
+		"host":     func(p *profile.Profile) { p.DBInstance, p.Host, p.RootCert = "", "*.example", "ca.pem" },
+	} {
+		p := base
+		edit(&p)
+		require.ErrorContains(t, p.Validate(), "wildcards", name)
+	}
+}
+
 func TestEnvironmentRejectsMisspelledProduction(t *testing.T) {
 	t.Parallel()
 	p := profile.Profile{Environment: "prodution", DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432}

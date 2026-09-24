@@ -3,7 +3,6 @@ package cli_test
 import (
 	"bytes"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/vertti/pg-tunnel/internal/cli"
-	"github.com/vertti/pg-tunnel/internal/profile"
 )
 
 func TestVersion(t *testing.T) {
@@ -92,19 +90,5 @@ func TestInitHelpRequiresNeitherTerminalNorAWS(t *testing.T) {
 	assert.Contains(t, output.String(), "-config")
 	for _, option := range []string{"--profile", "--aws-profile"} {
 		require.ErrorIs(t, cli.RunContext(t.Context(), []string{"init", option, "dev", "unexpected"}, &output), cli.ErrUsage)
-	}
-}
-
-func TestProductionWarningBeforeConnection(t *testing.T) {
-	t.Setenv("AWS_CONFIG_FILE", filepath.Join(t.TempDir(), "missing"))
-	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "missing"))
-	for _, environment := range []string{"production", "staging", "development", ""} {
-		path := filepath.Join(t.TempDir(), "config.json")
-		p := profile.Profile{Environment: environment, DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432, AWSProfile: "missing-test-profile"}
-		require.NoError(t, profile.Save(path, "test", &p))
-		var output bytes.Buffer
-		err := cli.RunContext(t.Context(), []string{"connect", "--config", path, "test"}, &output)
-		require.ErrorContains(t, err, "load AWS configuration")
-		assert.Equal(t, environment == "production", strings.Contains(output.String(), "WARNING: PRODUCTION"))
 	}
 }

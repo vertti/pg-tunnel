@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +130,19 @@ func TestSessionStopsAtFirstFailedStage(t *testing.T) {
 			err := RunContext(t.Context(), []string{"connect", "--config", path, "test"}, &output)
 			require.ErrorContains(t, err, tc.want)
 		})
+	}
+}
+
+func TestProductionWarningBeforeConnection(t *testing.T) {
+	isolateAWS(t)
+	for _, environment := range []string{"production", "staging", "development", ""} {
+		path := filepath.Join(t.TempDir(), "config.json")
+		p := profile.Profile{Environment: environment, DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432, AWSProfile: "missing-test-profile"}
+		require.NoError(t, profile.Save(path, "test", &p))
+		var output bytes.Buffer
+		err := RunContext(t.Context(), []string{"connect", "--config", path, "test"}, &output)
+		require.ErrorContains(t, err, "load AWS configuration")
+		assert.Equal(t, environment == "production", strings.Contains(output.String(), "WARNING: PRODUCTION"))
 	}
 }
 

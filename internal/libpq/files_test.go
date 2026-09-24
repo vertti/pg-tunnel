@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgpassfile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"github.com/vertti/pg-tunnel/internal/atomicfile"
 	"github.com/vertti/pg-tunnel/internal/libpq"
@@ -119,6 +120,29 @@ func TestUnsafeStorageAndSettingsRejected(t *testing.T) {
 	entries, err := os.ReadDir(root)
 	require.NoError(t, err)
 	assert.Empty(t, entries)
+}
+
+func TestRecoveryWaitsForStorageLock(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "sessions")
+	require.NoError(t, os.Mkdir(root, 0o700))
+	holder, err := os.Open(root) //nolint:gosec // The directory is inside t.TempDir.
+	require.NoError(t, err)
+	require.NoError(t, unix.Flock(int(holder.Fd()), unix.LOCK_EX))
+	recovered := make(chan error, 1)
+	go func() { recovered <- (libpq.Files{Root: root}).Recover() }()
+	select {
+	case <-recovered:
+		t.Fatal("recovery ran while another session held the storage lock")
+	case <-time.After(100 * time.Millisecond):
+	}
+	require.NoError(t, holder.Close())
+	select {
+	case err = <-recovered:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("recovery did not resume after the lock was released")
+	}
 }
 
 func TestStorageMustBeARealDirectory(t *testing.T) {
