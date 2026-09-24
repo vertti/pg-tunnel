@@ -101,12 +101,15 @@ func TestAWSConfigRequiresRegion(t *testing.T) {
 
 func TestMissingAWSLoginNamesTheFix(t *testing.T) {
 	isolateAWS(t)
-	ssoProfile := "[profile dev]\nsso_start_url = https://example.awsapps.com/start\nsso_region = eu-west-1\nsso_account_id = 123456789012\nsso_role_name = Reader\nregion = eu-west-1\n"
+	ssoProfile := "[profile dev]\nsso_start_url = https://example.awsapps.com/start\nsso_region = eu-west-1\nsso_account_id = 123456789012\nsso_role_name = Reader\nregion = eu-west-1\n[profile keys]\nregion = eu-west-1\n"
 	require.NoError(t, os.WriteFile(os.Getenv("AWS_CONFIG_FILE"), []byte(ssoProfile), 0o600)) //nolint:gosec // isolateAWS points this at a temporary file.
 	_, err := awsConfig(t.Context(), &profile.Profile{AWSProfile: "dev"})
 	require.ErrorContains(t, err, "aws sso login --profile dev")
-	_, err = awsConfig(t.Context(), &profile.Profile{Region: "eu-west-1"})
-	require.ErrorContains(t, err, "no usable AWS credentials; log in to AWS first")
+	for _, p := range []profile.Profile{{Region: "eu-west-1"}, {AWSProfile: "keys"}} {
+		_, err = awsConfig(t.Context(), &p)
+		require.ErrorContains(t, err, "no usable AWS credentials; make AWS credentials available")
+		require.NotContains(t, err.Error(), "aws sso login", "only SSO profiles are told to use aws sso login")
+	}
 }
 
 func TestSessionStopsAtFirstFailedStage(t *testing.T) {

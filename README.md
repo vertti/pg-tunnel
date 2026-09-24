@@ -54,8 +54,9 @@ That works for a quick look, and then it starts to hurt:
 If you've written a wrapper script for this, pg-tunnel is that script with the
 edge cases handled:
 
-- One executable with the Session Manager plugin built in. You need the AWS CLI
-  only if you log in with it, for example `aws sso login`.
+- One executable with the Session Manager plugin built in. It finds AWS
+  credentials the same way the AWS CLI does: environment variables, named
+  profiles, SSO, or aws-vault.
 - Finds the RDS endpoint from the instance name and the jump host from its EC2
   `Name` tag, or `init` discovers both and saves them for you.
 - Refreshes IAM tokens three minutes before they expire and rereads rotated
@@ -84,12 +85,11 @@ mise install
 mise run build   # creates bin/pg-tunnel
 ```
 
-Log in to AWS, then let `init` find your database and jump host, test the
-connection, and save it under a connection name:
+With working AWS credentials, let `init` find your database and jump host, test
+the connection, and save it under a connection name:
 
 ```sh
-aws sso login --profile YOUR_AWS_PROFILE
-pg-tunnel init --aws-profile YOUR_AWS_PROFILE
+pg-tunnel init --aws-profile YOUR_AWS_PROFILE   # or omit it to use your current credentials
 pg-tunnel run CONNECTION -- psql
 ```
 
