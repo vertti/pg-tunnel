@@ -12,8 +12,13 @@ builds:
     flags: [-trimpath, -buildvcs=true]
     ldflags: [-s -w]
     mod_timestamp: "{{ .CommitTimestamp }}"
+upx:
+  - enabled: true
+    goos: [linux]
+    compress: "9"
+    lzma: false
 archives:
-  - formats: [tar.gz]
+  - formats: [tar.xz]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     builds_info:
       owner: root

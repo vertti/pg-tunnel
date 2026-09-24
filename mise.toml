@@ -3,6 +3,7 @@ go = "1.27.1"
 golangci-lint = "2.13.2"
 actionlint = "1.7.12"
 goreleaser = "2.18.2"
+upx = { version = "5.2.1", os = ["linux"] }
 "go:github.com/google/go-licenses/v2" = "2.0.1"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.8.0"
 

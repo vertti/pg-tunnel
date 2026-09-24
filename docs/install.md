@@ -6,17 +6,19 @@ Download your archive and `checksums.txt` from the
 
 | System | Archive |
 | --- | --- |
-| macOS, Apple Silicon | `pg-tunnel_darwin_arm64.tar.gz` |
-| macOS, Intel | `pg-tunnel_darwin_amd64.tar.gz` |
-| Linux, ARM64 | `pg-tunnel_linux_arm64.tar.gz` |
-| Linux, x86-64 | `pg-tunnel_linux_amd64.tar.gz` |
+| macOS, Apple Silicon | `pg-tunnel_darwin_arm64.tar.xz` |
+| macOS, Intel | `pg-tunnel_darwin_amd64.tar.xz` |
+| Linux, ARM64 | `pg-tunnel_linux_arm64.tar.xz` |
+| Linux, x86-64 | `pg-tunnel_linux_amd64.tar.xz` |
+
+Older releases use `.tar.gz`; use the filename from your release.
 
 Download your archive and `checksums.txt` from the same release. For example,
 on Apple Silicon, run in the download directory:
 
 ```sh
-grep ' pg-tunnel_darwin_arm64.tar.gz$' checksums.txt | shasum -a 256 -c -
-tar -xzf pg-tunnel_darwin_arm64.tar.gz
+grep ' pg-tunnel_darwin_arm64.tar.xz$' checksums.txt | shasum -a 256 -c -
+tar -xf pg-tunnel_darwin_arm64.tar.xz
 mkdir -p ~/.local/bin
 install -m 755 pg-tunnel ~/.local/bin/pg-tunnel
 ```
