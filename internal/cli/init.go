@@ -44,7 +44,7 @@ func initProfile(ctx context.Context, args []string, output io.Writer) error {
 		}
 	}
 	// /dev/tty is not supported by Go's poller on every platform. Read it
-	// nonblocking and wait with poll so cancellation never depends on Close.
+	// nonblocking and wait with select so cancellation never depends on Close.
 	terminal, err := unix.Open("/dev/tty", unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return fmt.Errorf("interactive setup needs a terminal: %w", err)
@@ -74,14 +74,16 @@ type terminalInput struct {
 }
 
 func (input terminalInput) Read(buffer []byte) (int, error) {
-	descriptors := []unix.PollFd{{Fd: int32(input.fd), Events: unix.POLLIN}} //nolint:gosec // Unix file descriptors are signed C ints.
 	for {
 		select {
 		case <-input.done:
 			return 0, context.Canceled
 		default:
 		}
-		if _, err := unix.Poll(descriptors, 100); err != nil {
+		// macOS poll reports /dev/tty as always ready, which would spin; select does not.
+		var readable unix.FdSet
+		readable.Set(input.fd)
+		if _, err := unix.Select(input.fd+1, &readable, nil, nil, &unix.Timeval{Usec: 100_000}); err != nil {
 			if errors.Is(err, unix.EINTR) {
 				continue
 			}
