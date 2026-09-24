@@ -1,4 +1,4 @@
-// Package awsdb implements RDS discovery, IAM authentication, and SSM transport.
+// Package awsdb implements RDS discovery, database authentication, and SSM transport.
 package awsdb
 
 import (
@@ -53,7 +53,7 @@ func (r *Resolver) Resolve(ctx context.Context) (session.Target, error) {
 	if aws.ToString(db.Engine) != "postgres" {
 		return target, errors.New("the first AWS backend supports RDS PostgreSQL instances; use an explicit host for other PostgreSQL endpoints")
 	}
-	if !aws.ToBool(db.IAMDatabaseAuthenticationEnabled) {
+	if r.Profile.Auth != profile.AuthSecretsManager && !aws.ToBool(db.IAMDatabaseAuthenticationEnabled) {
 		return target, errors.New("IAM database authentication is disabled on this RDS instance")
 	}
 	if db.Endpoint == nil || aws.ToString(db.Endpoint.Address) == "" || aws.ToInt32(db.Endpoint.Port) <= 0 {

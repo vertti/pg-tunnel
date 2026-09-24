@@ -99,7 +99,7 @@ func TestWizardDiscoversAcrossPagesAndSavesOnlyAfterConfirmation(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			var output bytes.Buffer
 			// Invalid selection is retried; database name defaults to the RDS hint.
-			input := "bad\n9\n1\n1\n\nreader\nreadonly\n"
+			input := "bad\n9\n1\n1\n1\n\nreader\nreadonly\n"
 			if answer != "EOF" {
 				input += answer + "\n"
 			}
@@ -144,7 +144,7 @@ func TestWizardDiscoveryPermissionFailures(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			var output bytes.Buffer
-			wizard := setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, service), Input: strings.NewReader("1\n1\ni-manual\ndata\nreader\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
+			wizard := setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, service), Input: strings.NewReader("1\n1\ni-manual\n1\ndata\nreader\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
 			err := wizard.Run(t.Context())
 			if service == "sts" || service == "rds" {
 				require.Error(t, err)
@@ -188,7 +188,6 @@ func (brokenWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 func TestWizardRejectsUnusableDatabaseAndCA(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ name, from, to, want string }{
-		{"IAM disabled", "<IAMDatabaseAuthenticationEnabled>true", "<IAMDatabaseAuthenticationEnabled>false", "IAM authentication disabled"},
 		{"no endpoint", "<Address>example.rds.amazonaws.com</Address>", "<Address></Address>", "no endpoint yet"},
 		{"no PostgreSQL", "<Engine>postgres</Engine>", "<Engine>mysql</Engine>", "no RDS PostgreSQL instances"},
 		{"missing CA", "unchanged", "unchanged", "validate CA bundle"},
@@ -209,7 +208,7 @@ func TestWizardRejectsUnusableDatabaseAndCA(t *testing.T) {
 				return response, nil
 			})
 			path := filepath.Join(t.TempDir(), "profiles.json")
-			input := "1\n1\ndata\nreader\n"
+			input := "1\n1\n1\ndata\nreader\n"
 			wizard := setup.Wizard{Verify: successfulVerification, Config: cfg, Input: strings.NewReader(input), Output: io.Discard, Path: path, RootCert: filepath.Join(t.TempDir(), "missing.pem")}
 			require.ErrorContains(t, wizard.Run(t.Context()), tc.want)
 			assert.NoFileExists(t, path)
@@ -234,7 +233,7 @@ func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
 			defer cancel()
 			failure := errors.New(result)
 			var output bytes.Buffer
-			wizard := setup.Wizard{Config: fixtureConfig(t, ""), Input: strings.NewReader("1\n1\ndata\nreader\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
+			wizard := setup.Wizard{Config: fixtureConfig(t, ""), Input: strings.NewReader("1\n1\n1\ndata\nreader\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
 			wizard.Verify = func(_ context.Context, candidate *profile.Profile) error {
 				// The new profile is not on disk while the test session is running.
 				current, readErr := os.ReadFile(path) //nolint:gosec // The configuration is inside t.TempDir.
@@ -284,8 +283,8 @@ func TestWizardDefaultsToUniqueResources(t *testing.T) {
 		name, input, target, prompt string
 		singleHost                  bool
 	}{
-		{"one host", "\n\n\n\nreader\nreadonly\nyes\n", "i-chosen", "Jump host number [1]:", true},
-		{"multiple hosts", "\n\n2\n\n\nreader\nreadonly\nyes\n", "i-other", "Jump host number:", false},
+		{"one host", "\n\n\n\n\nreader\nreadonly\nyes\n", "i-chosen", "Jump host number [1]:", true},
+		{"multiple hosts", "\n\n2\n\n\n\nreader\nreadonly\nyes\n", "i-other", "Jump host number:", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -316,6 +315,65 @@ func TestWizardDefaultsToUniqueResources(t *testing.T) {
 			assert.Contains(t, output.String(), "IAM database user (must already exist with rds_iam membership): ")
 			assert.Contains(t, output.String(), "A value is required.")
 			assert.Equal(t, "reader", saved.User)
+		})
+	}
+}
+
+func TestWizardPasswordAuthentication(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, input, secret, user string
+		disableIAM, cancel        bool
+	}{
+		{name: "linked master", input: "2\n\n\n\n", secret: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:master", user: "admin"}, //nolint:gosec // Synthetic secret ARN, not a credential.
+		{name: "custom secret", input: "2\napplication/reader\n\nreader\n", secret: "application/reader", user: "reader"},
+		{name: "IAM disabled", input: "\n\n\n\n", secret: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:master", user: "admin", disableIAM: true}, //nolint:gosec // Synthetic secret ARN, not a credential.
+		{name: "cancelled", input: "2\napplication/reader\n\nreader\n", cancel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := fixtureConfig(t, "")
+			client := cfg.HTTPClient
+			cfg.HTTPClient = httpFunc(func(request *http.Request) (*http.Response, error) {
+				response, err := client.Do(request)
+				if err != nil {
+					return nil, fmt.Errorf("fixture response: %w", err)
+				}
+				if tc.disableIAM {
+					body, readErr := io.ReadAll(response.Body)
+					require.NoError(t, readErr)
+					require.NoError(t, response.Body.Close())
+					response.Body = io.NopCloser(strings.NewReader(strings.ReplaceAll(string(body), "<IAMDatabaseAuthenticationEnabled>true", "<IAMDatabaseAuthenticationEnabled>false")))
+				}
+				return response, nil
+			})
+			answer := "yes"
+			if tc.cancel {
+				answer = "no"
+			}
+			var output bytes.Buffer
+			path := filepath.Join(t.TempDir(), "profiles.json")
+			verified := false
+			wizard := setup.Wizard{Config: cfg, Input: strings.NewReader("1\n1\n" + tc.input + "password-connection\n" + answer + "\n"), Output: &output, Path: path, RootCert: certificate(t)}
+			wizard.Verify = func(_ context.Context, p *profile.Profile) error {
+				verified = true
+				assert.Equal(t, profile.AuthSecretsManager, p.Auth)
+				assert.Equal(t, tc.secret, p.SecretID)
+				assert.Equal(t, tc.user, p.User)
+				assert.Contains(t, output.String(), "Test and save this connection?")
+				return nil
+			}
+			require.NoError(t, wizard.Run(t.Context()))
+			assert.Equal(t, !tc.cancel, verified)
+			if tc.cancel {
+				assert.NoFileExists(t, path)
+				return
+			}
+			saved, err := profile.Load(path, "password-connection")
+			require.NoError(t, err)
+			assert.Equal(t, profile.AuthSecretsManager, saved.Auth)
+			assert.Equal(t, tc.secret, saved.SecretID)
+			assert.Equal(t, tc.user, saved.User)
 		})
 	}
 }

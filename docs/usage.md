@@ -33,9 +33,9 @@ still need AWS Vault to supply them. Add `--config pg-tunnel.json` to save local
 
 The wizard shows the account, lists RDS PostgreSQL instances in that region, and
 suggests running EC2 hosts that are online in SSM. Hosts in the database's VPC
-appear first. Enter an existing IAM database user and database name, then review
-the profile. After you confirm, the wizard opens a temporary tunnel, verifies TLS
-and database authentication, and cleans up the session before saving. It sends no
+appear first. Choose IAM or Secrets Manager authentication, enter an existing
+database user and database name, then review the profile. After you confirm, the
+wizard opens a temporary tunnel, verifies TLS and database authentication, and cleans up the session before saving. It sends no
 SQL queries. A failed test, cancellation, or cleanup error leaves the configuration
 unchanged. RDS CA certificates are managed automatically. Profiles are added to
 the shared user config by default; an existing name is never replaced.
@@ -45,17 +45,19 @@ Discovery needs `rds:DescribeDBInstances`, `ec2:DescribeInstances`, and
 `ssm:DescribeInstanceInformation`. It also calls STS `GetCallerIdentity` to show
 the account. If jump-host discovery is unavailable, you can enter the SSM target
 manually. Verification also needs the connection permissions listed below.
-RDS-linked master-user secret ARNs are shown as metadata only: the
-wizard does not read secret values, infer database users from secret names, or
-configure password authentication. This initial setup supports RDS PostgreSQL
-with IAM authentication.
+Secret values are read only during the confirmed connection test. For password
+authentication, you can select the RDS-linked master-user secret or enter another
+secret name/ARN. The master username is suggested only for its linked secret;
+other secrets require an explicit database user.
 
 | Setting | Meaning |
 | --- | --- |
 | `db_instance` | Discover an RDS PostgreSQL instance's endpoint and port. |
 | `host` | Alternative explicit database endpoint; mutually exclusive with `db_instance`. |
 | `port` | Remote port for an explicit host, default `5432`. |
-| `database`, `user` | PostgreSQL database and IAM-enabled database user. |
+| `database`, `user` | PostgreSQL database and existing database user. |
+| `auth` | `iam` (default) or `secrets-manager`; never falls back between modes. |
+| `secret_id` | Secret name or full ARN; required only for `auth: "secrets-manager"`. |
 | `target` | Explicit SSM managed instance ID. |
 | `jump_tag` | Alternative EC2 `Name` tag; must match exactly one running instance. |
 | `region`, `aws_profile` | Optional overrides for the standard AWS SDK configuration. |
@@ -77,11 +79,13 @@ RDS profile's `sslrootcert` setting to opt into automatic management.
 
 The SSM node must reach the database and support
 `AWS-StartPortForwardingSessionToRemoteHost`. Your identity needs
-`ssm:StartSession`, `ssm:TerminateSession`, and `rds-db:connect`. Discovery also
-needs `rds:DescribeDBInstances` and, when using a jump tag,
-`ec2:DescribeInstances`. The database must enable IAM authentication and grant
-`rds_iam` to the selected database user. The user's SQL permissions are defined
-in PostgreSQL; the utility does not grant read or write access.
+`ssm:StartSession` and `ssm:TerminateSession`. Discovery also needs
+`rds:DescribeDBInstances` and, when using a jump tag,
+`ec2:DescribeInstances`. IAM authentication additionally needs `rds-db:connect`,
+IAM enabled on the instance, and `rds_iam` granted to the database user. Password
+authentication needs `secretsmanager:GetSecretValue` for the selected secret and
+`kms:Decrypt` when it uses a customer-managed KMS key. The user's SQL permissions
+are defined in PostgreSQL; the utility does not grant read or write access.
 
 For AWS Vault, omit `aws_profile` from the connection profile and use a renewable
 credential source:
@@ -96,9 +100,30 @@ The utility reports AWS credential expiry when available and recognizes
 `AWS_CREDENTIAL_EXPIRATION` for environment credentials. SSO sessions can also
 require a fresh login after their underlying login session expires.
 
+## Secrets Manager passwords
+
+Choose **Secrets Manager password** in `init`, or add these fields to a profile:
+
+```json
+{
+  "auth": "secrets-manager",
+  "secret_id": "application/reader"
+}
+```
+
+The secret must contain a JSON `SecretString` with nonempty `username` and
+`password` fields. The username must match the profile's `user`; optional `host`
+and `port` must match the resolved database, and optional `engine` must be
+`postgres`. The profile's `database` selects the database. Binary secrets and
+alternating-user rotation are not supported. The configuration stores only the
+secret identifier; passwords are never copied into it.
+
+A user with `rds_iam` membership must use IAM authentication: on RDS PostgreSQL,
+[IAM takes precedence over password authentication](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html).
+
 ## Client behavior
 
-`run` verifies TLS and IAM database authentication before starting the command.
+`run` verifies TLS and database authentication before starting the command.
 It supplies `PGSERVICE`, `PGSERVICEFILE`, and `PGPASSFILE` pointing to private
 per-session files, replacing inherited `PG*` settings. Command output is left on
 stdout; tunnel diagnostics go to stderr. The real database hostname remains the
@@ -135,9 +160,14 @@ GUI support depends on the client's libpq/service-file capabilities.
 
 ## Renewal and cleanup
 
-IAM tokens are refreshed three minutes before their reported expiry. Transient
-failures retry after five seconds, with bounded exponential backoff up to one
-minute. A failed replacement leaves the last password file intact. Token expiry
+IAM tokens are refreshed three minutes before their reported expiry. Secrets
+Manager passwords are reread from `AWSCURRENT` every five minutes. Changed
+credentials must pass a fresh TLS/database login before replacing the password
+file. Passwords have no reported expiry; new connections may fail between database
+password rotation and the next successful refresh.
+
+Transient failures retry after five seconds, with bounded exponential backoff up
+to one minute. A failed replacement leaves the last password file intact. Token expiry
 affects new logins, not established database connections. A running process's
 password environment variable cannot be updated, so the utility uses file lookup.
 
@@ -158,6 +188,7 @@ pg-tunnel cleanup
 
 SIGKILL cannot trigger immediate cleanup. Orphaned child processes or SSM sessions
 may need separate termination; recovery removes credential files, not remote
-sessions. AWS session limits provide an additional backstop. This first version
-supports IAM only; Secrets Manager passwords, SSH/VPN transports, Windows, and
-additional client adapters are later work.
+sessions. AWS session limits provide an additional backstop. Unlike IAM tokens,
+passwords left after a crash do not expire automatically; run `pg-tunnel cleanup`
+to remove abandoned files. SSH/VPN transports, Windows, and additional client
+adapters remain later work.

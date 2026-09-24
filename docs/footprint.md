@@ -6,13 +6,13 @@ no Rust comparison has been performed.
 
 | Artifact | Bytes | Approximate MiB |
 | --- | ---: | ---: |
-| Current utility, including official AWS SSM code, stripped | 11,923,506 | 11.37 |
-| Current utility, gzip | 4,508,853 | 4.30 |
+| Initial utility, including official AWS SSM code, stripped | 11,923,506 | 11.37 |
+| Initial utility, gzip | 4,508,853 | 4.30 |
 | Previous utility, requiring an external plugin, stripped | 10,209,218 | 9.74 |
 | Previously required SSM plugin 1.2.835.0 | 9,887,008 | 9.43 |
 | Initial AWS SDK probe, stripped | 10,206,546 | 9.73 |
 
-The current runtime is one executable. Embedding AWS's port forwarding code adds
+The runtime is one executable. Embedding AWS's port forwarding code adds
 roughly 1.63 MiB to our binary and removes the separate 9.43 MiB plugin executable.
 It starts a second process from the same binary to isolate upstream signal and
 exit behavior; there is no executable extraction or first-run download. The CA
@@ -22,8 +22,7 @@ packages. Other platforms may have different footprints.
 
 The initial SDK probe retained RDS and EC2 discovery, SSM StartSession, Secrets
 Manager GetSecretValue, standard configuration/credential loading, and RDS IAM
-signing. No AWS calls were executed during that probe. The utility currently uses
-IAM only and does not retain Secrets Manager. The embedded plugin adds its own
+signing. No AWS calls were executed during that probe. The initial utility used IAM only; Secrets Manager support was added later. The embedded plugin adds its own
 transport and KMS support dependencies.
 
 The target is an uncompressed utility below 25 MiB. This is a development budget,
@@ -55,3 +54,16 @@ macOS arm64 with CGO disabled. Archives include dependency licenses and notices.
 `mise run package` reports exact sizes for each build. Two consecutive local
 builds produced identical archive SHA-256 checksums. The release workflow checks
 the 25 MiB executable limit and runs each archive on its native platform.
+
+## Secrets Manager support
+
+Measured on 2026-09-23 using the same toolchain and build flags. Password
+authentication adds the Secrets Manager SDK module and uses the existing pgx
+dependency for SCRAM/MD5 verification. The increase over v0.1.0 is about 1.1 MiB.
+
+| Target | Binary MiB | Archive MiB |
+| --- | ---: | ---: |
+| macOS arm64 | 12.69 | 4.81 |
+| macOS amd64 | 13.72 | 5.22 |
+| Linux arm64 | 12.38 | 4.62 |
+| Linux amd64 | 13.42 | 5.13 |

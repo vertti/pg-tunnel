@@ -26,7 +26,12 @@ run = [
 
 [tasks.test]
 description = "Run tests with race detection, randomized order, and coverage"
-run = "go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=coverage.out ./..."
+run = """
+if ! command -v initdb >/dev/null && command -v pg_config >/dev/null; then
+  export PATH="$(pg_config --bindir):$PATH"
+fi
+go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+"""
 
 [tasks.build]
 description = "Build the CLI into bin/pg-tunnel"

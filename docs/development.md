@@ -15,9 +15,14 @@ must name the rule and explain their scope. The main CI job runs on Linux. A sep
 release workflow builds all four archives on pull requests and smoke-tests them
 on native macOS/Linux amd64/arm64 runners.
 
+The SCRAM integration test starts an isolated local PostgreSQL cluster and removes
+it afterward. Install PostgreSQL locally to run it; `mise run test` finds binaries
+through `pg_config` when needed. It is skipped locally if PostgreSQL is absent,
+and required in CI (which uses the runner's installed PostgreSQL).
+
 The core interfaces live in `internal/session`. AWS discovery/authentication and
 SSM transport live in `internal/awsdb`; `internal/libpq` owns credential files and
-the TLS/IAM readiness check; `internal/process` owns process groups. The small
+the TLS/database readiness check; `internal/process` owns process groups. The small
 `internal/ssmplugin` adapter runs AWS code in an isolated copy of our executable.
 Profiles and CLI wiring remain separate from those providers.
 
