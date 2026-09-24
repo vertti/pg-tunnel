@@ -62,7 +62,8 @@ func TestEmbeddedStartupCancellationCleansUp(t *testing.T) {
 	}))
 	defer server.Close()
 	api := &localSSM{url: "ws" + strings.TrimPrefix(server.URL, "http") + "/?X-Amz-Signature=fixture"}
-	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example"}
+	// Release smoke tests supply the packaged executable; otherwise use this test binary.
+	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: os.Getenv("PG_TUNNEL_TEST_EXECUTABLE")}
 	_, err := transport.Open(ctx, session.Target{Host: "db.example", Port: 5432})
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, "session-example", api.terminated)
@@ -138,7 +139,8 @@ func TestEmbeddedShutdownSendsTerminationFlag(t *testing.T) {
 	}))
 	defer server.Close()
 	api := &localSSM{url: "ws" + strings.TrimPrefix(server.URL, "http") + "/?X-Amz-Signature=fixture", port: port}
-	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example"}
+	// Release smoke tests supply the packaged executable; otherwise use this test binary.
+	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: os.Getenv("PG_TUNNEL_TEST_EXECUTABLE")}
 	tunnel, err := transport.Open(ctx, session.Target{Host: "db.example", Port: 5432})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, tunnel.Close(t.Context())) })

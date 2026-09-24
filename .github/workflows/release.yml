@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -39,11 +39,13 @@ jobs:
           else
             mise run package
           fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - name: Verify Linux packing
+        run: mise x -- upx -t dist/pg-tunnel_linux*/pg-tunnel
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: packages
           path: |
-            dist/*.tar.gz
+            dist/*.tar.xz
             dist/checksums.txt
           if-no-files-found: error
           retention-days: 7
@@ -63,9 +65,16 @@ jobs:
           - runner: macos-15
             platform: darwin_arm64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          version: "2026.9.1"
+          install_args: go
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: packages
       - name: Verify and run archive
@@ -74,7 +83,7 @@ jobs:
           EXPECTED_COMMIT: ${{ github.sha }}
         run: |
           shasum -a 256 -c checksums.txt
-          tar -xzf "pg-tunnel_${PLATFORM}.tar.gz"
+          tar -xf "pg-tunnel_${PLATFORM}.tar.xz"
           test -f LICENSE
           test -f licenses/Go/LICENSE
           test -f licenses/github.com/aws/aws-sdk-go-v2/NOTICE.txt
@@ -85,7 +94,11 @@ jobs:
           ./pg-tunnel --help
           ./pg-tunnel init --help
           printf '%s binary bytes: %s\n' "$PLATFORM" "$(wc -c < pg-tunnel)"
-          printf '%s archive bytes: %s\n' "$PLATFORM" "$(wc -c < "pg-tunnel_${PLATFORM}.tar.gz")"
+          printf '%s archive bytes: %s\n' "$PLATFORM" "$(wc -c < "pg-tunnel_${PLATFORM}.tar.xz")"
+      - name: Verify packaged SSM lifecycle
+        run: |
+          PG_TUNNEL_TEST_EXECUTABLE="$PWD/pg-tunnel" mise x -- go test -count=1 -v \
+            ./internal/awsdb -run '^TestEmbedded(StartupCancellationCleansUp|ShutdownSendsTerminationFlag)$'
 
   verify:
     name: Release packages
@@ -107,7 +120,7 @@ jobs:
       contents: write
     timeout-minutes: 5
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: packages
       - name: Create draft release
@@ -115,4 +128,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes ./*.tar.gz checksums.txt
+        run: gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes ./*.tar.xz checksums.txt

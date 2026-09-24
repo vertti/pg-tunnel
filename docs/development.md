@@ -53,7 +53,10 @@ packages alongside the binary.
 ## Releases
 
 Release tools are pinned in mise; they are not runtime dependencies. Run
-`mise run package` to build local snapshots in `dist/`. Archives contain the
+`mise run package` to build local `tar.xz` snapshots in `dist/`. On Linux,
+GoReleaser also packs Linux binaries with UPX `-9` (pinned through mise).
+macOS snapshots skip UPX when it is unavailable; official releases are packaged
+on Linux, and CI requires both Linux binaries to pass `upx -t`. Archives contain the
 binary, project license, runtime dependency licenses/notices, Go's license, and
 AWS's upstream notices. `checksums.txt` uses SHA-256. License discovery inspects
 the command's imports, not just direct entries in `go.mod`.
@@ -61,8 +64,10 @@ the command's imports, not just direct entries in `go.mod`.
 Builds disable CGO, strip symbols and local paths, and use the Git commit time
 for archive timestamps. Use the same Go/tool versions, source commit and tags
 when comparing checksums. The release checks enforce the 25 MiB binary budget.
-Platform smoke tests verify checksums, notices, version/commit, and CLI startup;
-they do not log into AWS. Signing/notarization is not yet configured.
+Platform smoke tests verify checksums, notices, version/commit, CLI startup,
+and SSM startup cancellation and graceful shutdown using the packaged executable
+against a local WebSocket fixture; they do not log into AWS. Signing/notarization
+is not yet configured.
 
 After merging a release commit to main and choosing a version:
 
