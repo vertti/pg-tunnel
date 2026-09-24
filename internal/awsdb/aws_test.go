@@ -121,6 +121,7 @@ type fakeSSM struct {
 	historyErr     error
 	terminated     string
 	history        []types.Session
+	terminateTime  time.Duration
 }
 
 // DescribeSessions returns the configured remote cleanup outcome.
@@ -135,8 +136,11 @@ func (*fakeSSM) StartSession(context.Context, *ssm.StartSessionInput, ...func(*s
 }
 
 // TerminateSession records remote cleanup.
-func (f *fakeSSM) TerminateSession(_ context.Context, input *ssm.TerminateSessionInput, _ ...func(*ssm.Options)) (*ssm.TerminateSessionOutput, error) {
+func (f *fakeSSM) TerminateSession(ctx context.Context, input *ssm.TerminateSessionInput, _ ...func(*ssm.Options)) (*ssm.TerminateSessionOutput, error) {
 	f.terminated = aws.ToString(input.SessionId)
+	if deadline, ok := ctx.Deadline(); ok {
+		f.terminateTime = time.Until(deadline)
+	}
 	return &ssm.TerminateSessionOutput{}, f.terminationErr
 }
 

@@ -142,7 +142,9 @@ func TestEmbeddedShutdownSendsTerminationFlag(t *testing.T) {
 	tunnel, err := transport.Open(ctx, session.Target{Host: "db.example", Port: 5432})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, tunnel.Close(t.Context())) })
-	require.NoError(t, tunnel.Close(ctx))
+	closeCtx, closeCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer closeCancel()
+	require.NoError(t, tunnel.Close(closeCtx))
 	select {
 	case shutdownErr := <-result:
 		require.NoError(t, shutdownErr, "the AWS handler must send its termination flag before exiting")
@@ -150,6 +152,7 @@ func TestEmbeddedShutdownSendsTerminationFlag(t *testing.T) {
 		t.Fatal("timed out waiting for graceful SSM shutdown")
 	}
 	assert.Equal(t, "session-example", api.terminated)
+	assert.Greater(t, api.terminateTime, 4*time.Second, "remote termination has its own time budget")
 	entries, err := os.ReadDir(directory)
 	require.NoError(t, err)
 	assert.Empty(t, entries, "AWS must remove its multiplexing socket")

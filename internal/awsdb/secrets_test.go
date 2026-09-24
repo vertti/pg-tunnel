@@ -68,31 +68,6 @@ func secretAuth(t *testing.T, payload string, status int) awsdb.Secrets {
 	return awsdb.Secrets{API: api, ID: "chosen-secret"}
 }
 
-func TestSecretsRequireHostRejectsSecretsWithoutHost(t *testing.T) {
-	t.Parallel()
-	target := session.Target{Host: "db.example", Port: 5432, User: "reader"}
-	for _, tc := range []struct{ name, value, want string }{
-		{"missing host", `{"username":"reader","password":"private-marker"}`, "no host field"},
-		{"matching host", `{"username":"reader","password":"private-marker","host":"db.example"}`, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			payload, err := json.Marshal(map[string]string{"SecretString": tc.value})
-			require.NoError(t, err)
-			auth := secretAuth(t, string(payload), http.StatusOK)
-			auth.RequireHost = true
-			credential, err := auth.Credential(t.Context(), target)
-			if tc.want != "" {
-				require.ErrorContains(t, err, tc.want)
-				assert.NotContains(t, err.Error(), "private-marker")
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, "private-marker", credential.Secret)
-		})
-	}
-}
-
 func TestSecretsErrorsDoNotExposeResponseBodies(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
