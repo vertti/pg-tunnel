@@ -1,7 +1,7 @@
 # Installation
 
-The quickest install is `mise use -g github:vertti/pg-tunnel`. To install by
-hand, download your archive and `checksums.txt` from the
+The quickest install is `brew install vertti/tap/pg-tunnel` or
+`mise use -g github:vertti/pg-tunnel`. To install by hand, download your archive and `checksums.txt` from the
 [latest release](https://github.com/vertti/pg-tunnel/releases/latest), or
 [build from source](development.md#building-from-source).
 
