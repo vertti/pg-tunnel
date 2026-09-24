@@ -17,8 +17,8 @@ import (
 	"github.com/vertti/pg-tunnel/internal/session"
 )
 
-// Verify authenticates through the tunnel over verified TLS, without issuing SQL.
-func Verify(ctx context.Context, target session.Target, port int, credential session.Credential) error {
+// Verify authenticates over verified TLS and optionally reports privileged access.
+func Verify(ctx context.Context, target session.Target, port int, credential session.Credential, report func(string)) error {
 	tlsConfig, err := TLSConfig(target)
 	if err != nil {
 		return err
@@ -32,6 +32,9 @@ func Verify(ctx context.Context, target session.Target, port int, credential ses
 	defer cancel()
 	conn, err := pgconn.ConnectConfig(verifyCtx, config)
 	if err == nil {
+		if report != nil {
+			reportPrivileges(verifyCtx, conn, report)
+		}
 		err = conn.Close(verifyCtx)
 	}
 	if err != nil {
@@ -96,4 +99,28 @@ func isolatedConfig() (config *pgconn.Config, result error) {
 		return nil, fmt.Errorf("parse isolated verification settings: %w", err)
 	}
 	return config, nil
+}
+
+// Inspection is advisory: restricted catalog access must not block a valid login.
+func reportPrivileges(ctx context.Context, conn *pgconn.PgConn, report func(string)) {
+	const query = `SELECT current_user, r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolbypassrls,
+ EXISTS (SELECT 1 FROM pg_catalog.pg_roles AS privileged
+         WHERE privileged.rolname = 'rds_superuser'
+         AND pg_catalog.pg_has_role(current_user, privileged.oid, 'MEMBER'))
+ FROM pg_catalog.pg_roles AS r WHERE r.rolname = current_user`
+	result := conn.ExecParams(ctx, query, nil, nil, nil, nil).Read()
+	if result.Err != nil || len(result.Rows) != 1 || len(result.Rows[0]) != 6 {
+		report("WARNING: Could not inspect database privileges; access level is unknown.")
+		return
+	}
+	row := result.Rows[0]
+	var privileges []string
+	for i, label := range []string{"SUPERUSER", "CREATEROLE", "CREATEDB", "BYPASSRLS", "rds_superuser"} {
+		if string(row[i+1]) == "t" {
+			privileges = append(privileges, label)
+		}
+	}
+	if len(privileges) > 0 {
+		report(fmt.Sprintf("WARNING: Database user %q has privileged access (%s).", string(row[0]), strings.Join(privileges, ", ")))
+	}
 }

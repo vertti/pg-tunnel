@@ -175,3 +175,9 @@ func TestExplicitAuthenticationConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestEnvironmentRejectsMisspelledProduction(t *testing.T) {
+	t.Parallel()
+	p := profile.Profile{Environment: "prodution", DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432}
+	require.ErrorContains(t, p.Validate(), "environment must be")
+}

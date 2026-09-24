@@ -65,8 +65,9 @@ type Clients interface {
 	Prepare(Target, int, Credential) (Client, error)
 }
 
-// Verify checks actual database authentication through the local transport.
-type Verify func(context.Context, Target, int, Credential) error
+// Verify checks authentication and optionally reports access warnings.
+// A nil reporter skips inspection during credential refresh.
+type Verify func(context.Context, Target, int, Credential, func(string)) error
 
 // Command runs the user's process and waits for its exit.
 type Command func(context.Context, []string) error
@@ -107,7 +108,7 @@ func (r *Runner) Run(ctx context.Context) (result error) {
 	if err != nil {
 		return fmt.Errorf("obtain database credential: %w", err)
 	}
-	if err = r.Verify(startupCtx, target, tunnel.Port(), credential); err != nil {
+	if err = r.Verify(startupCtx, target, tunnel.Port(), credential, r.report); err != nil {
 		return fmt.Errorf("verify database authentication: %w", err)
 	}
 
@@ -189,7 +190,7 @@ func (r *Runner) renew(ctx context.Context, target Target, port int, client Clie
 	if credential.ExpiresAt.IsZero() && current.ExpiresAt.IsZero() && credential.Secret == current.Secret {
 		return credential, nil
 	}
-	if err = r.Verify(refreshCtx, target, port, credential); err != nil {
+	if err = r.Verify(refreshCtx, target, port, credential, nil); err != nil {
 		return Credential{}, fmt.Errorf("verify replacement credential; previous credential retained: %w", err)
 	}
 	if err = client.Update(credential); err != nil {

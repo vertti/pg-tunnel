@@ -16,19 +16,20 @@ const AuthSecretsManager = "secrets-manager"
 
 // Profile configures a database session without storing credentials.
 type Profile struct {
-	Auth       string `json:"auth,omitempty"`
-	SecretID   string `json:"secret_id,omitempty"`
-	DBInstance string `json:"db_instance"`
-	Host       string `json:"host"`
-	Database   string `json:"database"`
-	User       string `json:"user"`
-	Target     string `json:"target"`
-	JumpTag    string `json:"jump_tag"`
-	Region     string `json:"region"`
-	AWSProfile string `json:"aws_profile"`
-	RootCert   string `json:"sslrootcert,omitempty"`
-	Port       int    `json:"port"`
-	LocalPort  int    `json:"local_port"`
+	Environment string `json:"environment,omitempty"`
+	Auth        string `json:"auth,omitempty"`
+	SecretID    string `json:"secret_id,omitempty"`
+	DBInstance  string `json:"db_instance"`
+	Host        string `json:"host"`
+	Database    string `json:"database"`
+	User        string `json:"user"`
+	Target      string `json:"target"`
+	JumpTag     string `json:"jump_tag"`
+	Region      string `json:"region"`
+	AWSProfile  string `json:"aws_profile"`
+	RootCert    string `json:"sslrootcert,omitempty"`
+	Port        int    `json:"port"`
+	LocalPort   int    `json:"local_port"`
 }
 
 // Load reads one named profile; certificate paths are relative to its file.
@@ -129,7 +130,7 @@ func (p *Profile) Validate() error {
 	if p.LocalPort < 0 || p.LocalPort > 65535 || p.Port < 1 || p.Port > 65535 {
 		return errors.New("port must be 1–65535; local_port must be 0–65535 (0 selects an available port)")
 	}
-	if err := p.validateAuth(); err != nil {
+	if err := p.validateOptions(); err != nil {
 		return err
 	}
 	return p.validateText()
@@ -151,7 +152,13 @@ func (p *Profile) validateText() error {
 	return nil
 }
 
-func (p *Profile) validateAuth() error {
+func (p *Profile) validateOptions() error {
+	switch p.Environment {
+	case "", "development", "staging", "production":
+	default:
+		return errors.New("environment must be development, staging, or production (omit when unknown)")
+	}
+
 	switch p.Auth {
 	case "", "iam":
 		if p.SecretID != "" {

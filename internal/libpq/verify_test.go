@@ -60,7 +60,7 @@ func TestVerifyRequiresTrustedPasswordAuthentication(t *testing.T) {
 			if tc.iam {
 				credential.ExpiresAt = time.Now().Add(time.Minute)
 			}
-			err = libpq.Verify(t.Context(), session.Target{Host: host, Database: "data", User: "reader", RootCert: certPath}, address.Port, credential)
+			err = libpq.Verify(t.Context(), session.Target{Host: host, Database: "data", User: "reader", RootCert: certPath}, address.Port, credential, nil)
 			serverErr := <-serverResult
 			if tc.want == "" {
 				require.NoError(t, err)
