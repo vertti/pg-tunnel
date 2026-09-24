@@ -42,6 +42,7 @@ type tunnel struct {
 	api       SSMAPI
 	closeErr  error
 	process   *process.Group
+	lifeline  *os.File
 	logs      *logTail
 	sessionID string
 	token     string
@@ -94,7 +95,16 @@ func (s *SSM) launch(ctx context.Context, path string, input *ssm.StartSessionIn
 	if err != nil {
 		return err
 	}
-	handle.process, err = process.Start(ctx, args, env, nil, handle.logs, handle.logs)
+	// The child stops when this pipe closes, even if the supervisor is killed.
+	stdin, lifeline, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("create SSM child lifeline: %w", err)
+	}
+	handle.lifeline = lifeline
+	handle.process, err = process.Start(ctx, args, env, stdin, handle.logs, handle.logs)
+	if closeErr := stdin.Close(); err == nil && closeErr != nil {
+		err = closeErr
+	}
 	if err != nil {
 		return fmt.Errorf("launch embedded SSM child: %w", err)
 	}
@@ -148,7 +158,8 @@ func (t *tunnel) Err() error {
 	if err == nil {
 		err = errors.New("unexpected successful exit")
 	}
-	return fmt.Errorf("embedded SSM child exited: %s: %w", strings.ReplaceAll(t.logs.String(), t.token, "[redacted]"), err)
+	// The child's exit status is not the user's command status, so it is not wrapped.
+	return fmt.Errorf("embedded SSM child exited: %s: %s", strings.ReplaceAll(t.logs.String(), t.token, "[redacted]"), err.Error())
 }
 
 // Close terminates both the local plugin and remote session.
@@ -156,6 +167,9 @@ func (t *tunnel) Close(ctx context.Context) error {
 	t.once.Do(func() {
 		if t.process != nil {
 			t.closeErr = t.process.Stop(ctx)
+		}
+		if t.lifeline != nil {
+			t.closeErr = errors.Join(t.closeErr, t.lifeline.Close())
 		}
 		if t.sessionID == "" {
 			return

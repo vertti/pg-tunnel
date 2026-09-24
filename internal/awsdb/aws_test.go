@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/vertti/pg-tunnel/internal/awsdb"
+	"github.com/vertti/pg-tunnel/internal/process"
 	"github.com/vertti/pg-tunnel/internal/profile"
 	"github.com/vertti/pg-tunnel/internal/session"
 )
@@ -151,6 +152,7 @@ func TestPluginFailureTerminatesRemoteSession(t *testing.T) {
 	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: plugin}
 	_, err := transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
 	require.ErrorContains(t, err, "embedded SSM child exited")
+	assert.Equal(t, 1, process.ExitCode(err), "the plugin's status must not look like the user's command status")
 	assert.NotContains(t, err.Error(), "sensitive-token")
 	assert.Equal(t, "session-example", api.terminated)
 }
