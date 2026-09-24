@@ -180,9 +180,20 @@ func awsConfig(ctx context.Context, p *profile.Profile) (aws.Config, error) {
 		return cfg, fmt.Errorf("load AWS configuration; check your profile or SSO login: %w", err)
 	}
 	if cfg.Region == "" {
-		return cfg, errors.New("AWS region is missing; set region in the connection profile or AWS_REGION")
+		return cfg, errors.New("AWS region is missing; set region in the AWS profile or connection, pass --region to init, or set AWS_REGION")
+	}
+	// Discovery errors would otherwise blame IAM permissions for a missing login.
+	if _, err = cfg.Credentials.Retrieve(ctx); err != nil {
+		return cfg, fmt.Errorf("no usable AWS credentials; %s: %w", loginHint(p.AWSProfile), err)
 	}
 	return cfg, nil
+}
+
+func loginHint(awsProfile string) string {
+	if awsProfile == "" {
+		return "log in to AWS first, for example with aws sso login --profile NAME, and select that profile with --aws-profile or aws_profile"
+	}
+	return "log in with aws sso login --profile " + awsProfile + " or renew that profile's credentials"
 }
 
 func environmentExpiry() (time.Time, error) {

@@ -92,13 +92,30 @@ func TestAWSConfigRequiresRegion(t *testing.T) {
 	isolateAWS(t)
 	_, err := awsConfig(t.Context(), &profile.Profile{})
 	require.ErrorContains(t, err, "AWS region is missing")
+	t.Setenv("AWS_ACCESS_KEY_ID", "test")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
 	cfg, err := awsConfig(t.Context(), &profile.Profile{Region: "eu-north-1"})
 	require.NoError(t, err)
 	assert.Equal(t, "eu-north-1", cfg.Region)
 }
 
+func TestMissingAWSLoginNamesTheFix(t *testing.T) {
+	isolateAWS(t)
+	ssoProfile := "[profile dev]\nsso_start_url = https://example.awsapps.com/start\nsso_region = eu-west-1\nsso_account_id = 123456789012\nsso_role_name = Reader\nregion = eu-west-1\n"
+	require.NoError(t, os.WriteFile(os.Getenv("AWS_CONFIG_FILE"), []byte(ssoProfile), 0o600)) //nolint:gosec // isolateAWS points this at a temporary file.
+	_, err := awsConfig(t.Context(), &profile.Profile{AWSProfile: "dev"})
+	require.ErrorContains(t, err, "aws sso login --profile dev")
+	_, err = awsConfig(t.Context(), &profile.Profile{Region: "eu-west-1"})
+	require.ErrorContains(t, err, "no usable AWS credentials; log in to AWS first")
+}
+
 func TestSessionStopsAtFirstFailedStage(t *testing.T) {
 	isolateAWS(t)
+	// Static credentials pass the login check; AWS calls fail fast against a closed local port.
+	t.Setenv("AWS_ACCESS_KEY_ID", "test")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
+	t.Setenv("AWS_ENDPOINT_URL", "http://127.0.0.1:1")
+	t.Setenv("AWS_MAX_ATTEMPTS", "1")
 	directory := t.TempDir()
 	ca := testCA(t)
 	invalidCA := filepath.Join(directory, "invalid.pem")
@@ -153,7 +170,9 @@ func TestCleanupRemovesAbandonedSessions(t *testing.T) {
 	require.NoError(t, os.MkdirAll(abandoned, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(abandoned, "pgpass"), []byte("secret"), 0o600))
 	require.ErrorIs(t, RunContext(t.Context(), []string{"cleanup", "extra"}, io.Discard), ErrUsage)
-	require.NoError(t, RunContext(t.Context(), []string{"cleanup"}, io.Discard))
+	var summary bytes.Buffer
+	require.NoError(t, RunContext(t.Context(), []string{"cleanup"}, &summary))
+	assert.Equal(t, "Removed 1 abandoned session(s).\n", summary.String())
 	_, err = os.Stat(abandoned)
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
@@ -176,7 +195,7 @@ func isolateAWS(t *testing.T) {
 	t.Setenv("AWS_CONFIG_FILE", home+"/aws-config")
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", home+"/aws-credentials")
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-	for _, name := range []string{"AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_CREDENTIAL_EXPIRATION", "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN"} {
+	for _, name := range []string{"AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_CREDENTIAL_EXPIRATION", "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN", "AWS_ENDPOINT_URL", "AWS_MAX_ATTEMPTS"} {
 		t.Setenv(name, "")
 	}
 	require.NoError(t, os.WriteFile(home+"/aws-config", nil, 0o600))

@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -112,7 +114,7 @@ func load(path, name string) (Profile, error) {
 	}
 	value, ok := config.Profiles[name]
 	if !ok {
-		return Profile{}, fmt.Errorf("profile %q does not exist in %s", name, path)
+		return Profile{}, fmt.Errorf("profile %q does not exist in %s; %s", name, path, available(config.Profiles))
 	}
 	if value.Port == 0 {
 		value.Port = 5432
@@ -131,6 +133,13 @@ func load(path, name string) (Profile, error) {
 		return Profile{}, fmt.Errorf("resolve CA certificate path: %w", err)
 	}
 	return value, nil
+}
+
+func available(profiles map[string]Profile) string {
+	if len(profiles) == 0 {
+		return "it has no connections yet; create one with pg-tunnel init"
+	}
+	return "available: " + strings.Join(slices.Sorted(maps.Keys(profiles)), ", ")
 }
 
 // Validate rejects ambiguous discovery and unsafe client-file values.
