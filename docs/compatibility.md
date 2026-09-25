@@ -17,7 +17,7 @@ rejection time for the original token; see the [evidence](live-acceptance.md#cli
 | psycopg2 2.9.13 | Inherited settings; `psycopg2.connect("")` | Passed live | Passed live | Also [previously verified with 2.9.12](live-acceptance.md#token-renewal-follow-up). |
 | Psycopg 3.3.6 | Inherited settings; `psycopg.connect("")` | Passed live | Passed live | [Renewal evidence](live-acceptance.md#client-compatibility-follow-up) |
 | SQLAlchemy 2.1.0 + psycopg2 2.9.13 | `create_engine("postgresql+psycopg2://", pool_pre_ping=True)` | Passed live | Passed live after `engine.dispose()` | Avoid embedding a password in the URL. |
-| JupyterLab 4.6.3 / Server 2.21.0 + psycopg2 | Launch the whole server through `pg-tunnel run` | Passed live | Not separately tested in Jupyter | Two kernels, interrupt, restart and shutdown verified. [Notebook setup](usage.md#client-behavior). |
+| JupyterLab 4.6.3 / Server 2.21.0–2.21.1 + psycopg2 | Launch the whole server through `pg-tunnel run` | Passed live | Not separately tested in Jupyter | Two kernels, cell interrupt, restart and shutdown verified. [Network interruption limits](recovery.md); [setup](usage.md#client-behavior). |
 | Go pgx / pgxpool 5.11.0 | [Connection hook below](#go-pgx-pools) required | Passed locally and live | Passed live, two pools at 15m31s | [Renewal evidence and limits](live-acceptance.md#client-compatibility-follow-up) |
 | pgJDBC 42.7.13 / Java 17.0.18 | Generated service file is not directly compatible | Loopback URL rejected, as expected | Not tested | [Reproduced limitations below](#dbeaver-and-jdbc). |
 | DBeaver 26.2.1 (source reviewed only) | Requires a verified JDBC routing/TLS recipe | GUI not tested | Not tested | PgPass authentication alone does not resolve the JDBC limitation. |

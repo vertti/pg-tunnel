@@ -39,6 +39,10 @@ test with an observable pass/fail result; keep planned checks separate from evid
 Coverage includes cross-package calls so integration tests count toward the code
 they exercise, including the copyable client examples.
 
+The opt-in [Jupyter interruption check](recovery.md#repeat-the-check) uses an
+existing read-only AWS connection. It is separate from CI and never changes
+system network settings.
+
 The core interfaces live in `internal/session`. AWS discovery/authentication and
 SSM transport live in `internal/awsdb`; `internal/libpq` owns credential files and
 the TLS/database readiness check; `internal/process` owns process groups. The small
