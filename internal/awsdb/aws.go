@@ -21,8 +21,9 @@ import (
 	"github.com/vertti/pg-tunnel/internal/session"
 )
 
-// RDSAPI is the discovery operation used by Resolver.
+// RDSAPI discovers instance and cluster endpoints for Resolver.
 type RDSAPI interface {
+	DescribeDBClusters(context.Context, *rds.DescribeDBClustersInput, ...func(*rds.Options)) (*rds.DescribeDBClustersOutput, error)
 	DescribeDBInstances(context.Context, *rds.DescribeDBInstancesInput, ...func(*rds.Options)) (*rds.DescribeDBInstancesOutput, error)
 }
 
@@ -31,7 +32,7 @@ type EC2API interface {
 	DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
 }
 
-// Resolver resolves a configured RDS instance or an explicit endpoint.
+// Resolver resolves a configured RDS instance, Aurora cluster, or explicit endpoint.
 type Resolver struct {
 	API     RDSAPI
 	Profile *profile.Profile
@@ -43,6 +44,13 @@ func (r *Resolver) Resolve(ctx context.Context) (session.Target, error) {
 	if target.Host != "" {
 		return target, nil
 	}
+	if r.Profile.DBCluster != "" {
+		return r.resolveCluster(ctx, target)
+	}
+	return r.resolveInstance(ctx, target)
+}
+
+func (r *Resolver) resolveInstance(ctx context.Context, target session.Target) (session.Target, error) {
 	output, err := r.API.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{DBInstanceIdentifier: aws.String(r.Profile.DBInstance)})
 	if err != nil {
 		return target, fmt.Errorf("RDS DescribeDBInstances for %q (check region, profile, and rds:DescribeDBInstances permission): %w", r.Profile.DBInstance, err)
@@ -144,4 +152,31 @@ func credentialStatus(value *aws.Credentials, expiry time.Time) string {
 		return "AWS temporary credential expiry is unknown; static environment credentials cannot be renewed. Use a refreshable profile or aws-vault exec --server."
 	}
 	return "AWS credential expiry is not reported by the provider."
+}
+
+func (r *Resolver) resolveCluster(ctx context.Context, target session.Target) (session.Target, error) {
+	output, err := r.API.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(r.Profile.DBCluster)})
+	if err != nil {
+		return target, fmt.Errorf("RDS DescribeDBClusters for %q (check region, profile, and rds:DescribeDBClusters permission): %w", r.Profile.DBCluster, err)
+	}
+	if len(output.DBClusters) != 1 {
+		return target, fmt.Errorf("expected one Aurora cluster, found %d", len(output.DBClusters))
+	}
+	db := output.DBClusters[0]
+	if aws.ToString(db.Engine) != "aurora-postgresql" {
+		return target, errors.New("db_cluster supports only Aurora PostgreSQL; use db_instance or an explicit host for other PostgreSQL endpoints")
+	}
+	if r.Profile.Auth != profile.AuthSecretsManager && !aws.ToBool(db.IAMDatabaseAuthenticationEnabled) {
+		return target, errors.New("IAM database authentication is disabled on this Aurora cluster")
+	}
+	endpoint, kind := aws.ToString(db.Endpoint), profile.ClusterWriter
+	if r.Profile.ClusterEndpoint == profile.ClusterReader {
+		endpoint, kind = aws.ToString(db.ReaderEndpoint), profile.ClusterReader
+	}
+	port := int(aws.ToInt32(db.Port))
+	if endpoint == "" || port < 1 || port > 65535 {
+		return target, fmt.Errorf("RDS did not return a usable %s endpoint and port", kind)
+	}
+	target.Host, target.Port = endpoint, port
+	return target, nil
 }

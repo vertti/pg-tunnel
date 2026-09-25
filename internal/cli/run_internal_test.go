@@ -138,6 +138,7 @@ func TestSessionStopsAtFirstFailedStage(t *testing.T) {
 	}{
 		{func(p *profile.Profile) { p.Host, p.RootCert = "db.example", invalidCA }, "invalid CA", "validate CA certificate"},
 		{func(p *profile.Profile) { p.DBInstance = "example" }, "managed CA reaches RDS discovery", "discover database"},
+		{func(p *profile.Profile) { p.DBCluster = "example" }, "managed CA reaches cluster discovery", "DescribeDBClusters"},
 		{func(p *profile.Profile) { p.Host, p.RootCert = "db.example", ca }, "explicit host reaches SSM", "open tunnel"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

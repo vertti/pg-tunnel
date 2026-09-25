@@ -25,22 +25,30 @@ const (
 	EnvironmentProduction  = "production"
 )
 
+// Cluster endpoint choices select AWS-managed Aurora endpoints.
+const (
+	ClusterWriter = "writer"
+	ClusterReader = "reader"
+)
+
 // Profile configures a database session without storing credentials.
 type Profile struct {
-	Environment string `json:"environment,omitempty"`
-	Auth        string `json:"auth,omitempty"`
-	SecretID    string `json:"secret_id,omitempty"`
-	DBInstance  string `json:"db_instance"`
-	Host        string `json:"host"`
-	Database    string `json:"database"`
-	User        string `json:"user"`
-	Target      string `json:"target"`
-	JumpTag     string `json:"jump_tag"`
-	Region      string `json:"region"`
-	AWSProfile  string `json:"aws_profile"`
-	RootCert    string `json:"sslrootcert,omitempty"`
-	Port        int    `json:"port"`
-	LocalPort   int    `json:"local_port"`
+	Environment     string `json:"environment,omitempty"`
+	Auth            string `json:"auth,omitempty"`
+	SecretID        string `json:"secret_id,omitempty"`
+	DBInstance      string `json:"db_instance"`
+	DBCluster       string `json:"db_cluster,omitempty"`
+	ClusterEndpoint string `json:"cluster_endpoint,omitempty"`
+	Host            string `json:"host"`
+	Database        string `json:"database"`
+	User            string `json:"user"`
+	Target          string `json:"target"`
+	JumpTag         string `json:"jump_tag"`
+	Region          string `json:"region"`
+	AWSProfile      string `json:"aws_profile"`
+	RootCert        string `json:"sslrootcert,omitempty"`
+	Port            int    `json:"port"`
+	LocalPort       int    `json:"local_port"`
 }
 
 // Load reads one named profile; certificate paths are relative to its file.
@@ -144,8 +152,8 @@ func available(profiles map[string]Profile) string {
 
 // Validate rejects ambiguous discovery and unsafe client-file values.
 func (p *Profile) Validate() error {
-	if (p.DBInstance == "") == (p.Host == "") {
-		return errors.New("set exactly one of db_instance or host")
+	if err := p.validateSource(); err != nil {
+		return err
 	}
 	if (p.Target == "") == (p.JumpTag == "") {
 		return errors.New("set exactly one of target (SSM instance ID) or jump_tag (EC2 Name tag)")
@@ -164,10 +172,10 @@ func (p *Profile) Validate() error {
 
 func (p *Profile) validateText() error {
 	if p.Host != "" && p.RootCert == "" {
-		return errors.New("sslrootcert is required for an explicit host; RDS instance profiles can use automatic certificates")
+		return errors.New("sslrootcert is required for an explicit host; RDS instance and cluster profiles can use automatic certificates")
 	}
 
-	for _, value := range []string{p.DBInstance, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert, p.SecretID} {
+	for _, value := range []string{p.DBInstance, p.DBCluster, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert, p.SecretID} {
 		if !plainText(value) {
 			return errors.New("profile values must be UTF-8 without control characters or surrounding whitespace")
 		}
@@ -201,6 +209,27 @@ func (p *Profile) validateOptions() error {
 		}
 	default:
 		return errors.New("auth must be iam or secrets-manager")
+	}
+	return nil
+}
+
+func (p *Profile) validateSource() error {
+	sources := 0
+	for _, value := range []string{p.DBInstance, p.DBCluster, p.Host} {
+		if value != "" {
+			sources++
+		}
+	}
+	if sources != 1 {
+		return errors.New("set exactly one of db_instance, db_cluster, or host")
+	}
+	if p.ClusterEndpoint != "" {
+		if p.DBCluster == "" {
+			return errors.New("cluster_endpoint requires db_cluster")
+		}
+		if p.ClusterEndpoint != ClusterWriter && p.ClusterEndpoint != ClusterReader {
+			return errors.New("cluster_endpoint must be writer or reader (default writer)")
+		}
 	}
 	return nil
 }
