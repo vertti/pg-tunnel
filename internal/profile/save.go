@@ -28,7 +28,7 @@ func Save(path, name string, p *Profile) error {
 		return err
 	}
 	if err := p.Validate(); err != nil {
-		return fmt.Errorf("validate profile to save: %w", err)
+		return fmt.Errorf("validate connection to save: %w", err)
 	}
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -47,7 +47,7 @@ func Save(path, name string, p *Profile) error {
 		return err
 	}
 	if _, exists := profiles[name]; exists {
-		return fmt.Errorf("profile %q already exists in %s; choose a different name or edit the file manually", name, path)
+		return fmt.Errorf("connection %q already exists in %s; choose a different name or edit the file manually", name, path)
 	}
 	profiles[name] = *p
 	return writeConfig(path, profiles)
@@ -56,7 +56,7 @@ func Save(path, name string, p *Profile) error {
 func writeConfig(path string, profiles map[string]Profile) error {
 	data, err := json.MarshalIndent(configuration{Profiles: profiles}, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode profiles: %w", err)
+		return fmt.Errorf("encode configuration: %w", err)
 	}
 	if len(data) >= 1<<20 {
 		return errors.New("updated configuration exceeds the 1 MiB size limit")
@@ -90,7 +90,7 @@ func profilesToSave(path string) (map[string]Profile, error) {
 
 func validateName(name string) error {
 	if name == "" || !plainText(name) {
-		return errors.New("profile name must be non-empty UTF-8 without control characters or surrounding whitespace")
+		return errors.New("connection name must be non-empty UTF-8 without control characters or surrounding whitespace")
 	}
 	return nil
 }

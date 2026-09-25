@@ -57,7 +57,7 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return execute(verifyCtx, candidate, func(context.Context, []string) error { return nil }, reporter(stderr))
 	}
 	if err = wizard.Run(ctx); err != nil {
-		return fmt.Errorf("initialize profile: %w", err)
+		return fmt.Errorf("initialize connection: %w", err)
 	}
 	return nil
 }

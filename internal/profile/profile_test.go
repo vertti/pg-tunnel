@@ -225,3 +225,14 @@ func TestOversizedConfigurationReportsSizeLimit(t *testing.T) {
 	_, err := profile.Load(path, "dev")
 	require.ErrorContains(t, err, "1 MiB size limit")
 }
+
+func TestMissingConnectionListsAvailableNames(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	require.NoError(t, os.WriteFile(path, []byte(valid), 0o600))
+	_, err := profile.Load(path, "prod")
+	require.ErrorContains(t, err, `connection "prod" does not exist in `+path+"; available: dev")
+	require.NoError(t, os.WriteFile(path, []byte(`{"profiles":{}}`), 0o600))
+	_, err = profile.Load(path, "prod")
+	require.ErrorContains(t, err, "it has no connections yet; create one with pg-tunnel init")
+}

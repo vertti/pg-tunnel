@@ -6,7 +6,7 @@ select AWS credentials.
 
 Both `run` and `connect` select one configuration file, in this order:
 
-1. The explicit `--config PATH`, if supplied before the profile name.
+1. The explicit `--config PATH`, if supplied before the connection name.
 2. `pg-tunnel.json` in the current directory.
 3. The shared user configuration:
    - macOS: `~/Library/Application Support/pg-tunnel/pg-tunnel.json`

@@ -74,9 +74,9 @@ func TestSaveRejectsInvalidInputBeforeWriting(t *testing.T) {
 	path := filepath.Join(directory, "profiles.json")
 	valid := profile.Profile{DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432}
 	for _, name := range []string{"", " padded", "line\nbreak"} {
-		require.ErrorContains(t, profile.Save(path, name, &valid), "profile name")
+		require.ErrorContains(t, profile.Save(path, name, &valid), "connection name")
 	}
-	require.ErrorContains(t, profile.Save(path, "dev", &profile.Profile{}), "validate profile to save")
+	require.ErrorContains(t, profile.Save(path, "dev", &profile.Profile{}), "validate connection to save")
 	blocker := filepath.Join(directory, "file")
 	require.NoError(t, os.WriteFile(blocker, nil, 0o600))
 	require.ErrorContains(t, profile.Save(filepath.Join(blocker, "profiles.json"), "dev", &valid), "create configuration directory")
