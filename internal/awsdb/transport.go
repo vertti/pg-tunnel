@@ -31,6 +31,7 @@ type SSMAPI interface {
 // SSM supervises the official plugin and owns the corresponding remote session.
 type SSM struct {
 	API        SSMAPI
+	Report     func(string)
 	Target     string
 	Region     string
 	Profile    string
@@ -73,7 +74,7 @@ func (s *SSM) Open(ctx context.Context, target session.Target) (_ session.Tunnel
 	if err != nil {
 		return nil, fmt.Errorf("SSM StartSession for %s; check ssm:StartSession permission and the target's SSM connectivity: %w", s.Target, err)
 	}
-	handle := &tunnel{api: s.API, sessionID: aws.ToString(output.SessionId), token: aws.ToString(output.TokenValue), port: port, logs: &logTail{}}
+	handle := &tunnel{api: s.API, sessionID: aws.ToString(output.SessionId), token: aws.ToString(output.TokenValue), port: port, logs: &logTail{report: s.Report}}
 	defer func() {
 		if result != nil {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -228,14 +229,30 @@ func (t *tunnel) waitReady(ctx context.Context) error {
 }
 
 type logTail struct {
-	text string
-	mu   sync.Mutex
+	report  func(string)
+	text    string
+	pending string
+	mu      sync.Mutex
 }
 
 func (l *logTail) Write(data []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.text += string(data)
+	l.pending += string(data)
+	for {
+		line, rest, found := strings.Cut(l.pending, "\n")
+		if !found {
+			break
+		}
+		l.pending = rest
+		if l.report != nil && (line == ssmplugin.RecoveryStarted || line == ssmplugin.RecoveryResumed) {
+			l.report(line)
+		}
+	}
+	if len(l.pending) > 8192 {
+		l.pending = ""
+	}
 	if len(l.text) > 8192 {
 		l.text = l.text[len(l.text)-8192:]
 	}

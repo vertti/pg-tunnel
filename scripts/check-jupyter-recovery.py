@@ -231,6 +231,23 @@ Path(RECORD).write_text(json.dumps({'pid': os.getpid(), 'backend': backend, 'set
             f"Disconnected SSM; blocking new data-channel connections for {args.outage:g}s.",
             flush=True,
         )
+        if args.expect_stop:
+            status = proc.wait(timeout=75)
+            assert status != 0, "exhausted recovery must exit nonzero"
+            assert "SSM recovery exceeded 1m" in (root / "server.log").read_text()
+            try:
+                os.kill(before["pid"], 0)
+            except ProcessLookupError:
+                pass
+            else:
+                raise AssertionError("kernel survived exhausted recovery")
+            elapsed = time.monotonic() - interrupted
+            assert 55 <= elapsed <= 75, "recovery did not respect its one-minute budget"
+            print(
+                f"PASS: exhausted recovery reported and kernel stopped after {elapsed:.1f}s.",
+                flush=True,
+            )
+            return
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             if proc.poll() is not None:
@@ -307,11 +324,18 @@ if __name__ == "__main__":
         "--outage",
         type=float,
         default=0,
-        help="seconds to reject new SSM data connections (0..60)",
+        help="seconds to reject new SSM data connections (0..120)",
+    )
+    parser.add_argument(
+        "--expect-stop",
+        action="store_true",
+        help="require recovery-budget failure and kernel shutdown; use with --outage 75",
     )
     args = parser.parse_args()
-    if not 0 <= args.outage <= 60:
-        parser.error("--outage must be between 0 and 60 seconds")
+    if not 0 <= args.outage <= 120:
+        parser.error("--outage must be between 0 and 120 seconds")
+    if args.expect_stop and args.outage < 75:
+        parser.error("--expect-stop requires --outage of at least 75 seconds")
     root = Path(tempfile.mkdtemp(prefix="pg-tunnel-recovery-"))
     versions = {
         name: importlib.metadata.version(name)
