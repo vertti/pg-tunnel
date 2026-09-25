@@ -18,6 +18,17 @@ This budget begins when the plugin detects the disconnect, not when the network
 first fails. It does not guarantee recovery from laptop sleep, active writes, or
 every SSM agent/environment. Save work before deliberately testing a long outage.
 
+## Verified bounded recovery
+
+On 2026-09-25, using `82dc110` on macOS arm64 with the same Python/Jupyter
+versions listed below, the 30-second settled-idle outage passed. A fresh
+read-only TLS login succeeded after 35.6 seconds with the same Jupyter server
+and kernel PIDs, local port and private file paths, and a new database backend.
+A 75-second outage with `--expect-stop` also passed: recovery exhaustion was
+reported and the kernel stopped after 60.6 seconds. Both checks removed private
+credentials and the local listener. These measurements cover settled idle
+connections, not SQL running during the interruption.
+
 ## Baseline before bounded recovery
 
 On 2026-09-25, using the CLI at `fcd5f5f` on macOS arm64 with JupyterLab 4.6.3, Jupyter Server 2.21.1, ipykernel 7.3.0,
