@@ -108,6 +108,7 @@ func TestMissingAWSLoginNamesTheFix(t *testing.T) {
 	for _, p := range []profile.Profile{{Region: "eu-west-1"}, {AWSProfile: "keys"}} {
 		_, err = awsConfig(t.Context(), &p)
 		require.ErrorContains(t, err, "no usable AWS credentials; make AWS credentials available")
+		require.ErrorContains(t, err, "AWS_PROFILE or the connection's aws_profile")
 		require.NotContains(t, err.Error(), "aws sso login", "only SSO profiles are told to use aws sso login")
 	}
 }

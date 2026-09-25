@@ -196,7 +196,7 @@ func loginHint(cfg *aws.Config) string {
 			return "AWS profile " + shared.Profile + " uses IAM Identity Center; log in with aws sso login --profile " + shared.Profile
 		}
 	}
-	return "make AWS credentials available the way the AWS CLI finds them (environment, a named profile, or aws-vault) and select a profile with --aws-profile or aws_profile if needed"
+	return "make AWS credentials available the way the AWS CLI finds them (environment, a named profile, or aws-vault) and select a profile with AWS_PROFILE or the connection's aws_profile if needed"
 }
 
 func environmentExpiry() (time.Time, error) {
