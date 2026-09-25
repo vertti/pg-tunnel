@@ -88,7 +88,8 @@ RDS profile's `sslrootcert` setting to opt into automatic management.
 
 The SSM node must reach the database and support
 `AWS-StartPortForwardingSessionToRemoteHost`. Your identity needs
-`ssm:StartSession` and `ssm:TerminateSession`. Discovery also needs
+`ssm:StartSession` and `ssm:TerminateSession`; resuming an interrupted connection
+also needs `ssm:ResumeSession`. Discovery also needs
 `rds:DescribeDBInstances` and, when using a jump tag,
 `ec2:DescribeInstances`. IAM authentication additionally needs `rds-db:connect`,
 IAM enabled on the instance, and `rds_iam` granted to the database user. Password
@@ -189,6 +190,9 @@ This keeps the session alive and prints the three settings to stdout as shell
 service and password file paths. Diagnostics go to stderr. Ctrl-C closes the
 session and exits 0. GUI support depends on the client's libpq/service-file
 capabilities.
+
+See [network interruption behavior and its live check](recovery.md) for recovery
+limits when a notebook server loses its SSM connection.
 
 ## Renewal and cleanup
 
