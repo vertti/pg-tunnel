@@ -14,11 +14,10 @@ import (
 	"github.com/vertti/pg-tunnel/internal/setup"
 )
 
-func initProfile(ctx context.Context, args []string, output io.Writer) error {
+func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
-	flags.SetOutput(output)
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: pg-tunnel init [--aws-profile PROFILE] [--region REGION] [--config PATH] [--sslrootcert PEM]") //nolint:errcheck // flag.Usage has no error return.
+		fmt.Fprintln(flags.Output(), "Usage: pg-tunnel init [--aws-profile PROFILE] [--region REGION] [--config PATH] [--sslrootcert PEM]") //nolint:errcheck // flag.Usage has no error return.
 		flags.PrintDefaults()
 	}
 	var p profile.Profile
@@ -27,11 +26,8 @@ func initProfile(ctx context.Context, args []string, output io.Writer) error {
 	flags.StringVar(&p.AWSProfile, "aws-profile", "", "AWS profile to use and save (defaults to current AWS credentials)")
 	flags.StringVar(&p.AWSProfile, "profile", "", "alias for --aws-profile")
 	path := flags.String("config", "", "destination JSON file (defaults to shared user configuration)")
-	if err := flags.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return fmt.Errorf("%w: %w", ErrUsage, err)
+	if help, err := parseFlags(flags, args, stdout, stderr); help || err != nil {
+		return err
 	}
 	if flags.NArg() != 0 {
 		return usageError("init takes no arguments; pass the AWS profile with --aws-profile")
@@ -56,9 +52,9 @@ func initProfile(ctx context.Context, args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	wizard := setup.Wizard{Input: terminalInput{fd: terminal, done: ctx.Done()}, Output: output, Config: cfg, AWSProfile: p.AWSProfile, RootCert: p.RootCert, Path: *path}
+	wizard := setup.Wizard{Input: terminalInput{fd: terminal, done: ctx.Done()}, Output: stderr, Config: cfg, AWSProfile: p.AWSProfile, RootCert: p.RootCert, Path: *path}
 	wizard.Verify = func(verifyCtx context.Context, candidate *profile.Profile) error {
-		return execute(verifyCtx, candidate, func(context.Context, []string) error { return nil }, reporter(output))
+		return execute(verifyCtx, candidate, func(context.Context, []string) error { return nil }, reporter(stderr))
 	}
 	if err = wizard.Run(ctx); err != nil {
 		return fmt.Errorf("initialize profile: %w", err)

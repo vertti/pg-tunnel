@@ -28,11 +28,10 @@ import (
 	"github.com/vertti/pg-tunnel/internal/setup"
 )
 
-func runSession(ctx context.Context, mode string, args []string, output io.Writer) error {
+func runSession(ctx context.Context, mode string, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet(mode, flag.ContinueOnError)
-	flags.SetOutput(output)
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: pg-tunnel "+sessionSyntax[mode]) //nolint:errcheck // flag.Usage has no error return.
+		fmt.Fprintln(flags.Output(), "Usage: pg-tunnel "+sessionSyntax[mode]) //nolint:errcheck // flag.Usage has no error return.
 		flags.PrintDefaults()
 	}
 	var path string
@@ -43,11 +42,8 @@ func runSession(ctx context.Context, mode string, args []string, output io.Write
 		path = value
 		return nil
 	})
-	if err := flags.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return fmt.Errorf("%w: %w", ErrUsage, err)
+	if help, err := parseFlags(flags, args, stdout, stderr); help || err != nil {
+		return err
 	}
 	name, command, err := sessionArguments(mode, flags.Args())
 	if err != nil {
@@ -62,8 +58,8 @@ func runSession(ctx context.Context, mode string, args []string, output io.Write
 	if err != nil {
 		return fmt.Errorf("load connection profile: %w", err)
 	}
-	report := reporter(output)
-	return execute(ctx, &p, sessionCommand(command, os.Stdout, report), report)
+	report := reporter(stderr)
+	return execute(ctx, &p, sessionCommand(command, stdout, report), report)
 }
 
 func reporter(output io.Writer) func(string) {
