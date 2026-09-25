@@ -195,6 +195,9 @@ capabilities.
 See [network interruption behavior and its live check](recovery.md) for recovery
 limits when a notebook server loses its SSM connection.
 
+For Docker or devcontainers, run the client and pg-tunnel together inside the
+container; see the [container recipe and renewal check](containers.md).
+
 ## Renewal and cleanup
 
 IAM tokens are refreshed three minutes before their reported expiry. Secrets
