@@ -13,11 +13,11 @@ Both `run` and `connect` select one configuration file, in this order:
    - Linux: `$XDG_CONFIG_HOME/pg-tunnel/pg-tunnel.json`, or
      `~/.config/pg-tunnel/pg-tunnel.json` when `XDG_CONFIG_HOME` is unset or empty.
 
-Use the user configuration to share profiles across worktrees without repeating
+Use the user configuration to share connections across worktrees without repeating
 `--config`. Files are not merged: an invalid or unreadable selected file, or a
-missing profile within it, is an error. An explicit missing file never falls back
+missing connection within it, is an error. An explicit missing file never falls back
 to another location. Certificate paths are relative to the selected file, so move
-its CA bundle too if the profile uses a relative `sslrootcert` path.
+its CA bundle too if the connection uses a relative `sslrootcert` path.
 
 A `pg-tunnel.json` picked up from the current directory may not set `host` or
 `sslrootcert`. Otherwise a cloned repository could supply a CA it controls and let
@@ -36,16 +36,16 @@ pg-tunnel init --aws-profile dev
 ```
 
 For an SSO profile, log in first with `aws sso login --profile dev`. The selected
-AWS profile is saved in the connection profile, so subsequent `run` and `connect`
-commands reuse it. Profiles whose credentials exist only in AWS Vault's keychain
+AWS profile is saved in the connection, so subsequent `run` and `connect`
+commands reuse it. AWS profiles whose credentials exist only in AWS Vault's keychain
 still need AWS Vault to supply them. Add `--config pg-tunnel.json` to save locally.
 
 The wizard shows the account, lists RDS PostgreSQL instances in that region, and
 suggests running EC2 hosts that are online in SSM. Hosts in the database's VPC
 appear first. Choose IAM or Secrets Manager authentication, enter an existing
-database user and database name, then review the profile. After you confirm, the
+database user and database name, then review the connection. After you confirm, the
 wizard opens a temporary tunnel, verifies TLS and database authentication, and cleans up the session before saving. It also reads PostgreSQL role metadata to warn about privileged access. A failed test, cancellation, or cleanup error leaves the configuration
-unchanged. RDS CA certificates are managed automatically. Profiles are added to
+unchanged. RDS CA certificates are managed automatically. Connections are added to
 the shared user config by default; an existing name is never replaced.
 Use `--config` for the project file if one would shadow your shared configuration.
 
@@ -82,9 +82,9 @@ refresh keeps a usable cached bundle and prints a warning; a missing, invalid, o
 expired bundle must be downloaded successfully. Database connections always use
 `verify-full`, including hostname and certificate-expiry checks.
 
-Use `init --sslrootcert /path/to/ca.pem` or set `sslrootcert` in a profile to manage
+Use `init --sslrootcert /path/to/ca.pem` or set `sslrootcert` in a connection to manage
 trust yourself. Custom files are never refreshed or replaced. Remove an existing
-RDS profile's `sslrootcert` setting to opt into automatic management.
+RDS connection's `sslrootcert` setting to opt into automatic management.
 
 The SSM node must reach the database and support
 `AWS-StartPortForwardingSessionToRemoteHost`. Your identity needs
@@ -99,7 +99,7 @@ the selected secret and `kms:Decrypt` when it uses a customer-managed KMS key. T
 user's SQL permissions are defined in PostgreSQL; the utility does not grant read
 or write access.
 
-For AWS Vault, omit `aws_profile` from the connection profile and use a renewable
+For AWS Vault, omit `aws_profile` from the connection and use a renewable
 credential source:
 
 ```sh
@@ -113,7 +113,7 @@ require a fresh login after their underlying login session expires.
 
 ## Secrets Manager passwords
 
-Choose **Secrets Manager password** in `init`, or add these fields to a profile:
+Choose **Secrets Manager password** in `init`, or add these fields to a connection:
 
 ```json
 {
@@ -123,9 +123,9 @@ Choose **Secrets Manager password** in `init`, or add these fields to a profile:
 ```
 
 The secret must contain a JSON `SecretString` with nonempty `username` and
-`password` fields. The username must match the profile's `user`; optional `host`
+`password` fields. The username must match the connection's `user`; optional `host`
 and `port` must match the resolved database, and optional `engine` must be
-`postgres`. The profile's `database` selects the database. Binary secrets and
+`postgres`. The connection's `database` selects the database. Binary secrets and
 alternating-user rotation are not supported. The configuration stores only the
 secret identifier; passwords are never copied into it.
 
@@ -135,7 +135,7 @@ A user with `rds_iam` membership must use IAM authentication: on RDS PostgreSQL,
 ## Connection warnings
 
 `init` asks for the environment; choose **Production** to print a prominent
-warning whenever the connection starts. For existing profiles, set
+warning whenever the connection starts. For existing connections, set
 `"environment": "production"`. Unspecified environments are not classified.
 
 At startup, a read-only PostgreSQL catalog query checks the logged-in user's
