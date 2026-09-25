@@ -143,7 +143,7 @@ func TestLoadMissingConfigurationReportsLocations(t *testing.T) {
 	_, err = profile.Load("", "dev")
 	require.ErrorContains(t, err, "pg-tunnel.json in the current directory")
 	require.ErrorContains(t, err, filepath.Join(userDirectory, "pg-tunnel", "pg-tunnel.json"))
-	require.ErrorContains(t, err, "--config PATH")
+	require.ErrorContains(t, err, "create one with pg-tunnel init or use --config PATH")
 }
 
 func TestProjectAndExplicitConfigDoNotRequireHome(t *testing.T) {
