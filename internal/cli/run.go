@@ -134,7 +134,7 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	}
 	runner := session.Runner{
 		Resolver:  &awsdb.Resolver{API: rds.NewFromConfig(cfg), Profile: p},
-		Transport: &awsdb.SSM{API: ssm.NewFromConfig(cfg), Region: cfg.Region, Profile: p.AWSProfile, Target: jump, LocalPort: p.LocalPort},
+		Transport: &awsdb.SSM{API: ssm.NewFromConfig(cfg), Region: cfg.Region, Profile: p.AWSProfile, Target: jump, LocalPort: p.LocalPort, Report: report},
 		Auth:      authentication,
 		Clients:   libpq.Files{Root: root}, Verify: libpq.Verify, Env: os.Environ(), Report: report,
 		Command: command,
