@@ -88,3 +88,28 @@ credentials did not expire during the test. Actual AWS credential rotation is
 therefore not live-verified. A deterministic test using the real AWS credential
 cache covers expiry, transient provider failure, and recovery with replacement
 credentials.
+
+## Client compatibility follow-up
+
+On 2026-09-25, the v0.2.1 CLI on macOS arm64 ran two simultaneous read-only
+SSM/IAM sessions. The [compatibility list](compatibility.md) records exact client
+versions and recipes. Two pgx 5.11.0 pools opened new physical connections every
+minute, with different backend PIDs and verified TLS. Their private password
+files changed at 12 minutes; fresh logins succeeded at 15m31s, after the original
+tokens' advertised expiry. Ports and private files were distinct, with 0600 file
+and 0700 directory permissions. Both sessions removed their files and listeners;
+AWS SSM history confirmed both reached `Terminated`.
+
+psql 18.6, Psycopg 3.3.6, psycopg2 2.9.13 and SQLAlchemy 2.1.0 with psycopg2 also
+opened fresh read-only TLS connections after that expiry. The SQLAlchemy check
+disposed the pool first; all checks observed new backend PIDs. pgx rejected a
+wrong TLS hostname in both long runs. A separate short session confirmed the
+same rejection for all four libpq clients, keeping loopback routing unchanged.
+
+An additional negative assertion expected the original IAM tokens to fail at
+15m31s. **RDS still accepted them**, so both Go harnesses exited 1 on that assertion
+after the successful renewal checks. This run establishes refreshed-file login
+behavior, not the exact server-side expiry cutoff or rejection of stale IAM
+tokens. The local PostgreSQL regression test separately proves that the example
+reloads a replacement password when the original password no longer works.
+Underlying AWS credentials did not expire during this run.

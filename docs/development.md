@@ -28,10 +28,16 @@ statement coverage drops below the floor in `mise.toml`; raise it as coverage gr
 release workflow builds all four archives on pull requests and smoke-tests them
 on native macOS/Linux amd64/arm64 runners.
 
-The SCRAM integration test starts an isolated local PostgreSQL cluster and removes
-it afterward. Install PostgreSQL locally to run it; `mise run test` finds binaries
-through `pg_config` when needed. It is skipped locally if PostgreSQL is absent,
+The SCRAM and pgx client integration tests start isolated local PostgreSQL
+clusters and remove them afterward. Install PostgreSQL locally to run them;
+`mise run test` finds binaries through `pg_config` when needed. They are skipped locally if PostgreSQL is absent,
 and required in CI (which uses the runner's installed PostgreSQL).
+
+Client integration changes must update the [compatibility list](compatibility.md)
+with versions, setup, and completed verification. Include a smallest concrete
+test with an observable pass/fail result; keep planned checks separate from evidence.
+Coverage includes cross-package calls so integration tests count toward the code
+they exercise, including the copyable client examples.
 
 The core interfaces live in `internal/session`. AWS discovery/authentication and
 SSM transport live in `internal/awsdb`; `internal/libpq` owns credential files and

@@ -80,7 +80,8 @@ conn = psycopg.connect("")
 `pg-tunnel` manages private connection files and removes them on shutdown.
 Your shared `~/.pgpass` stays untouched. See the
 [client guide](docs/usage.md#client-behavior) for existing notebook servers and
-separately launched clients.
+separately launched clients, and the [compatibility list](docs/compatibility.md)
+for tested clients, credential renewal and known limitations.
 
 ## Development
 

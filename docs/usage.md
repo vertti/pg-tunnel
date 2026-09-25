@@ -151,8 +151,9 @@ It supplies `PGSERVICE`, `PGSERVICEFILE`, and `PGPASSFILE` pointing to private
 per-session files, replacing inherited `PG*` settings. Command output is left on
 stdout; tunnel diagnostics go to stderr. The real database hostname remains the
 TLS identity, while `hostaddr=127.0.0.1` routes libpq through the local tunnel.
-Go programs using pgx ignore `hostaddr` in service files; point them at
-`127.0.0.1` and the tunnel port while keeping the real hostname for TLS.
+See the [client compatibility list](compatibility.md) for verified setups and
+limitations. Go pgx pools need the [connection hook](compatibility.md#go-pgx-pools)
+to handle local routing and reread refreshed credentials.
 
 The tunnel listens on `127.0.0.1`, so other accounts on the same machine can
 reach the database through it while it runs. They still need database
