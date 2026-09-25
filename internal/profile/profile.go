@@ -54,9 +54,9 @@ func Load(path, name string) (Profile, error) {
 	if err != nil {
 		return Profile{}, err
 	}
-	// A cloned repository could otherwise pair a host and CA it controls with the user's credentials.
-	if project && value.Host != "" {
-		return Profile{}, fmt.Errorf("profile %q in %s sets an explicit host, which a pg-tunnel.json found in the current directory may not do; trust this file with --config %s", name, path, path)
+	// A cloned repository could otherwise trust a CA it controls with the user's credentials.
+	if project && (value.Host != "" || value.RootCert != "") {
+		return Profile{}, fmt.Errorf("profile %q in %s sets host or sslrootcert, which a pg-tunnel.json found in the current directory may not do; trust this file with --config %s", name, path, path)
 	}
 	return value, nil
 }

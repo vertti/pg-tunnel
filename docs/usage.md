@@ -19,10 +19,10 @@ missing profile within it, is an error. An explicit missing file never falls bac
 to another location. Certificate paths are relative to the selected file, so move
 its CA bundle too if the profile uses a relative `sslrootcert` path.
 
-A `pg-tunnel.json` picked up from the current directory may not set an explicit
-`host`. Otherwise a cloned repository could pair a host and CA it controls with
-your AWS credentials or database password. Select such a file with `--config` to
-trust it.
+A `pg-tunnel.json` picked up from the current directory may not set `host` or
+`sslrootcert`. Otherwise a cloned repository could supply a CA it controls and let
+a jump host impersonate the database to capture your IAM token or database
+password. Select such a file with `--config` to trust it.
 
 ## Interactive setup
 
