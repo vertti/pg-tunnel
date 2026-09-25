@@ -60,9 +60,10 @@ pg-tunnel run CONNECTION -- psql
 ```
 
 `init` saves to your user configuration, which every directory shares. To keep
-connections with a project instead, start from `pg-tunnel.example.json` and save
-it as `pg-tunnel.json` in the project; a project file replaces the user
-configuration while you work in that directory. RDS CA certificates are managed
+connections with a project instead, start from
+[`pg-tunnel.example.json`](pg-tunnel.example.json) and save it as
+`pg-tunnel.json` in the project; a project file replaces the user configuration
+while you work in that directory. RDS CA certificates are managed
 automatically. The SSM jump host must reach the database. See
 [configuration and AWS permissions](docs/usage.md) for details.
 
