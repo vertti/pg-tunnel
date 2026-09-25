@@ -19,10 +19,10 @@ missing profile within it, is an error. An explicit missing file never falls bac
 to another location. Certificate paths are relative to the selected file, so move
 its CA bundle too if the profile uses a relative `sslrootcert` path.
 
-A `pg-tunnel.json` picked up from the current directory may not set an explicit
-`host`. Otherwise a cloned repository could pair a host and CA it controls with
-your AWS credentials or database password. Select such a file with `--config` to
-trust it.
+A `pg-tunnel.json` picked up from the current directory may not set `host` or
+`sslrootcert`. Otherwise a cloned repository could supply a CA it controls and let
+a jump host impersonate the database to capture your IAM token or database
+password. Select such a file with `--config` to trust it.
 
 ## Interactive setup
 
@@ -89,20 +89,21 @@ RDS profile's `sslrootcert` setting to opt into automatic management.
 The SSM node must reach the database and support
 `AWS-StartPortForwardingSessionToRemoteHost`. Your identity needs
 `ssm:StartSession` and `ssm:TerminateSession`; resuming an interrupted connection
-also needs `ssm:ResumeSession`. Discovery also needs
-`rds:DescribeDBInstances` and, when using a jump tag,
-`ec2:DescribeInstances`. IAM authentication additionally needs `rds-db:connect`,
-IAM enabled on the instance, and `rds_iam` granted to the database user. Password
-authentication needs `secretsmanager:GetSecretValue` for the selected secret and
-`kms:Decrypt` when it uses a customer-managed KMS key. The user's SQL permissions
-are defined in PostgreSQL; the utility does not grant read or write access.
+also needs `ssm:ResumeSession`. When `TerminateSession` fails,
+`ssm:DescribeSessions` confirms the session already ended; without it, that
+cleanup reports an error. Discovery also needs `rds:DescribeDBInstances` and,
+when using a jump tag, `ec2:DescribeInstances`. IAM authentication additionally
+needs `rds-db:connect`, IAM enabled on the instance, and `rds_iam` granted to the
+database user. Password authentication needs `secretsmanager:GetSecretValue` for
+the selected secret and `kms:Decrypt` when it uses a customer-managed KMS key. The
+user's SQL permissions are defined in PostgreSQL; the utility does not grant read
+or write access.
 
 For AWS Vault, omit `aws_profile` from the connection profile and use a renewable
 credential source:
 
 ```sh
-aws-vault exec --server YOUR_PROFILE -- \
-  mise exec -- ./bin/pg-tunnel run development -- psql
+aws-vault exec --server YOUR_PROFILE -- pg-tunnel run development -- psql
 ```
 
 Static temporary credentials in environment variables cannot refresh themselves.

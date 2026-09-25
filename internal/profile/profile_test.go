@@ -14,6 +14,8 @@ import (
 
 const valid = `{"profiles":{"dev":{"db_instance":"example","database":"data","user":"reader","target":"i-example","sslrootcert":"ca.pem"}}}`
 
+var projectValid = strings.Replace(valid, `,"sslrootcert":"ca.pem"`, "", 1)
+
 func TestLoadResolvesDefaultsAndCAPath(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -73,11 +75,10 @@ func TestLoadConfigurationPrecedence(t *testing.T) {
 		})
 	}
 
-	require.NoError(t, os.WriteFile("pg-tunnel.json", []byte(strings.Replace(valid, `"reader"`, `"project-reader"`, 1)), 0o600))
+	require.NoError(t, os.WriteFile("pg-tunnel.json", []byte(strings.Replace(projectValid, `"reader"`, `"project-reader"`, 1)), 0o600))
 	value, err := profile.Load("", "dev")
 	require.NoError(t, err)
 	assert.Equal(t, "project-reader", value.User)
-	assert.Equal(t, filepath.Join(directory, "ca.pem"), value.RootCert)
 
 	explicitPath := filepath.Join(directory, "explicit.json")
 	require.NoError(t, os.WriteFile(explicitPath, []byte(strings.Replace(valid, `"reader"`, `"explicit-reader"`, 1)), 0o600))
@@ -88,16 +89,21 @@ func TestLoadConfigurationPrecedence(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
-func TestProjectConfigCannotChooseDatabaseHost(t *testing.T) {
-	directory := t.TempDir()
-	t.Chdir(directory)
-	explicitHost := `{"profiles":{"dev":{"host":"db.example","database":"data","user":"reader","target":"i-example","sslrootcert":"ca.pem"}}}`
-	require.NoError(t, os.WriteFile("pg-tunnel.json", []byte(explicitHost), 0o600))
-	_, err := profile.Load("", "dev")
-	require.ErrorContains(t, err, "--config pg-tunnel.json")
-	value, err := profile.Load("pg-tunnel.json", "dev")
-	require.NoError(t, err)
-	assert.Equal(t, "db.example", value.Host)
+func TestProjectConfigCannotChooseHostOrCA(t *testing.T) {
+	for name, content := range map[string]string{
+		"host":        `{"profiles":{"dev":{"host":"db.example","database":"data","user":"reader","target":"i-example","sslrootcert":"ca.pem"}}}`,
+		"sslrootcert": valid,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			require.NoError(t, os.WriteFile("pg-tunnel.json", []byte(content), 0o600))
+			_, err := profile.Load("", "dev")
+			require.ErrorContains(t, err, "--config pg-tunnel.json")
+			value, err := profile.Load("pg-tunnel.json", "dev")
+			require.NoError(t, err)
+			assert.NotEmpty(t, value.RootCert)
+		})
+	}
 }
 
 func TestLoadDoesNotFallBackFromExistingProjectConfig(t *testing.T) {
@@ -137,7 +143,7 @@ func TestLoadMissingConfigurationReportsLocations(t *testing.T) {
 	_, err = profile.Load("", "dev")
 	require.ErrorContains(t, err, "pg-tunnel.json in the current directory")
 	require.ErrorContains(t, err, filepath.Join(userDirectory, "pg-tunnel", "pg-tunnel.json"))
-	require.ErrorContains(t, err, "--config PATH")
+	require.ErrorContains(t, err, "create one with pg-tunnel init or use --config PATH")
 }
 
 func TestProjectAndExplicitConfigDoNotRequireHome(t *testing.T) {
@@ -146,7 +152,7 @@ func TestProjectAndExplicitConfigDoNotRequireHome(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	_, err := profile.Load("", "dev")
 	require.ErrorContains(t, err, "find user configuration directory")
-	require.NoError(t, os.WriteFile("pg-tunnel.json", []byte(valid), 0o600))
+	require.NoError(t, os.WriteFile("pg-tunnel.json", []byte(projectValid), 0o600))
 	_, err = profile.Load("", "dev")
 	require.NoError(t, err)
 	_, err = profile.Load("pg-tunnel.json", "dev")
@@ -156,7 +162,7 @@ func TestProjectAndExplicitConfigDoNotRequireHome(t *testing.T) {
 func TestAutomaticCAIsOnlyAvailableForRDSInstances(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "profiles.json")
-	content := strings.Replace(valid, `,"sslrootcert":"ca.pem"`, "", 1)
+	content := projectValid
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	value, err := profile.Load(path, "dev")
 	require.NoError(t, err)

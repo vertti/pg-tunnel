@@ -28,7 +28,7 @@ func run() int {
 	}
 	ctx, stop := process.SignalContext(context.Background())
 	defer stop()
-	if err := cli.RunContext(ctx, os.Args[1:], os.Stderr); err != nil {
+	if err := cli.RunContext(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		log.Print(err)
 		if errors.Is(err, cli.ErrUsage) {
 			return 2
