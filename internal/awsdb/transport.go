@@ -82,17 +82,17 @@ func (s *SSM) Open(ctx context.Context, target session.Target) (_ session.Tunnel
 			result = errors.Join(result, handle.Close(cleanupCtx))
 		}
 	}()
-	if err := s.launch(startupCtx, path, input, output, handle); err != nil {
+	if err := s.launch(startupCtx, path, output, handle); err != nil {
 		return nil, err
 	}
 	return handle, nil
 }
 
-func (s *SSM) launch(ctx context.Context, path string, input *ssm.StartSessionInput, output *ssm.StartSessionOutput, handle *tunnel) error {
+func (s *SSM) launch(ctx context.Context, path string, output *ssm.StartSessionOutput, handle *tunnel) error {
 	if handle.sessionID == "" || handle.token == "" || aws.ToString(output.StreamUrl) == "" {
 		return errors.New("SSM returned incomplete session details")
 	}
-	args, env, err := s.pluginCommand(ctx, path, input, output)
+	args, env, err := s.pluginCommand(ctx, path, output)
 	if err != nil {
 		return err
 	}
@@ -112,22 +112,17 @@ func (s *SSM) launch(ctx context.Context, path string, input *ssm.StartSessionIn
 	return handle.waitReady(ctx)
 }
 
-func (s *SSM) pluginCommand(ctx context.Context, path string, input *ssm.StartSessionInput, output *ssm.StartSessionOutput) (args, env []string, result error) {
+func (s *SSM) pluginCommand(ctx context.Context, path string, output *ssm.StartSessionOutput) (args, env []string, result error) {
 	response, err := json.Marshal(output)
 	if err != nil {
 		return nil, nil, fmt.Errorf("encode SSM response: %w", err)
-	}
-	request, err := json.Marshal(input)
-	if err != nil {
-		return nil, nil, fmt.Errorf("encode SSM request: %w", err)
 	}
 	endpoint, err := ssm.NewDefaultEndpointResolverV2().ResolveEndpoint(ctx, ssm.EndpointParameters{Region: aws.String(s.Region)})
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve SSM endpoint: %w", err)
 	}
-	const responseEnv = ssmplugin.ResponseEnv
-	args = []string{path, ssmplugin.Command, responseEnv, s.Region, "StartSession", s.Profile, string(request), endpoint.URI.String()}
-	env = append(os.Environ(), responseEnv+"="+string(response))
+	args = []string{path, ssmplugin.Command, s.Region, s.Profile, s.Target, endpoint.URI.String()}
+	env = append(os.Environ(), ssmplugin.ResponseEnv+"="+string(response))
 	return args, env, nil
 }
 
