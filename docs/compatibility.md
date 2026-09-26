@@ -27,6 +27,22 @@ Unlisted clients, including DataGrip, pgAdmin, asyncpg and node-postgres, have n
 been verified. Explicit connection strings can override inherited settings;
 pg-tunnel does not generate or update `DATABASE_URL` or `PGPASSWORD`.
 
+## Database endpoints
+
+| Endpoint | Configuration | Verification |
+| --- | --- | --- |
+| RDS PostgreSQL instance | `db_instance` | Live TLS login, IAM renewal and Secrets Manager authentication; see [acceptance evidence](live-acceptance.md). |
+| Aurora PostgreSQL instance | `db_instance` | Resolver fixtures; no live Aurora connection verified. |
+| Aurora PostgreSQL cluster writer / reader | `db_cluster`, optional `cluster_endpoint` | Local fixtures verify selection, fresh discovery, forwarding parameters, IAM signing and TLS/client settings. No live Aurora login or failover test. |
+
+Cluster fixture checks use this source checkout; v0.2.1 does not include cluster
+selection. Cluster selection currently requires [manual configuration](usage.md#aurora-cluster-endpoints).
+The repeatable local check is `mise x -- go test ./internal/awsdb -run TestCluster -v`.
+The changed-endpoint fixture verifies a fresh API lookup, not an actual Aurora
+failover. A live acceptance check still requires a fresh TLS-verified read-only
+identity query through each chosen endpoint and cleanup afterward. No Aurora
+PostgreSQL cluster was available in the existing test account/region on 2026-09-25.
+
 ## Go pgx pools
 
 pgx 5.11.0 does not implement libpq's `hostaddr`: it treats it as a server runtime
