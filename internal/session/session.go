@@ -40,7 +40,7 @@ type Auth interface {
 	Credential(context.Context, Target) (Credential, error)
 }
 
-// Tunnel owns a transport and its eventual exit status.
+// Tunnel owns a transport and its eventual exit status; Err is non-nil once Done closes.
 type Tunnel interface {
 	Port() int
 	Done() <-chan struct{}
@@ -139,17 +139,10 @@ func (r *Runner) runCommand(ctx context.Context, target Target, tunnel Tunnel, c
 	case err := <-commandDone:
 		return err
 	case <-tunnel.Done():
-		err := fmt.Errorf("tunnel stopped; child command is being stopped: %w", tunnelError(tunnel.Err()))
+		err := fmt.Errorf("tunnel stopped; child command is being stopped: %w", tunnel.Err())
 		cancel(err)
 		return errors.Join(err, <-commandDone)
 	}
-}
-
-func tunnelError(err error) error {
-	if err == nil {
-		return errors.New("transport exited unexpectedly")
-	}
-	return err
 }
 
 const (
