@@ -21,7 +21,7 @@ func TestRejectsUnsupportedChildInvocations(t *testing.T) {
 		nil,
 		{"--version"},
 		{"region", "", "i-test"},
-		{ssmplugin.ResponseEnv, "region", "StartSession", "", "{}", "endpoint"},
+		{"AWS_SSM_START_SESSION_RESPONSE", "region", "StartSession", "", "{}", "endpoint"},
 	} {
 		require.ErrorContains(t, ssmplugin.Run(args, io.Discard), "invalid internal SSM invocation")
 	}
