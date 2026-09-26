@@ -1,10 +1,10 @@
 # Configuration and usage
 
-A connection (the `CONNECTION` argument of `run` and `connect`) is a named entry
+A connection (the `CONNECTION` argument of `run`, `connect`, and `check`) is a named entry
 under `profiles` in `pg-tunnel.json`. It is unrelated to AWS profiles, which
 select AWS credentials.
 
-Both `run` and `connect` select one configuration file, in this order:
+`run`, `connect`, and `check` select one configuration file, in this order:
 
 1. The explicit `--config PATH`, supplied before the connection name.
 2. `pg-tunnel.json` in the current directory.
@@ -114,6 +114,17 @@ Temporary AWS credentials in environment variables cannot refresh themselves.
 Use a renewable credential source for long sessions; SSO may require another login
 when its session expires. `AWS_CREDENTIAL_EXPIRATION` lets pg-tunnel report the
 expiry of environment credentials.
+
+## Check a saved connection
+
+```sh
+pg-tunnel check development
+pg-tunnel check --config /path/to/pg-tunnel.json development
+```
+
+`check` verifies AWS access, the tunnel and database login, then cleans up and
+exits without launching a client. It reports failures on stderr and returns a
+nonzero exit status if verification or cleanup fails.
 
 ## Secrets Manager passwords
 

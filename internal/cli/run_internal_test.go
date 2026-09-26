@@ -147,9 +147,13 @@ func TestSessionStopsAtFirstFailedStage(t *testing.T) {
 			tc.edit(&p)
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			require.NoError(t, profile.Save(path, "test", &p))
-			var output bytes.Buffer
-			err := RunContext(t.Context(), []string{"connect", "--config", path, "test"}, io.Discard, &output)
-			require.ErrorContains(t, err, tc.want)
+			for _, mode := range []string{"connect", "check"} {
+				var stdout, stderr bytes.Buffer
+				err := RunContext(t.Context(), []string{mode, "--config", path, "test"}, &stdout, &stderr)
+				require.ErrorContains(t, err, tc.want)
+				assert.Empty(t, stdout.String())
+				assert.NotContains(t, stderr.String(), "Connection check passed")
+			}
 		})
 	}
 }
