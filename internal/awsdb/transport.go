@@ -106,23 +106,32 @@ func (s *SSM) launch(ctx context.Context, path string, output *ssm.StartSessionO
 	return handle.waitReady(ctx)
 }
 
+// maxBufferedResponse stays well below pipe capacity (64 KiB on Linux and macOS),
+// so the response is written before the child starts without blocking.
+const maxBufferedResponse = 8 << 10
+
 // startChild sends the session response as the first stdin line; the child then
 // stops when that pipe closes, even if the supervisor is killed.
 func startChild(ctx context.Context, args []string, response []byte, handle *tunnel) error {
+	if len(response) >= maxBufferedResponse {
+		return fmt.Errorf("SSM session response is %d bytes; the limit is %d", len(response), maxBufferedResponse)
+	}
 	stdin, lifeline, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("create SSM child lifeline: %w", err)
 	}
 	handle.lifeline = lifeline
+	// Writing while the read end is still open here means a child that exits
+	// early cannot turn its own failure into a broken-pipe error.
+	if _, err = lifeline.Write(append(response, '\n')); err != nil {
+		return errors.Join(fmt.Errorf("send SSM session to child: %w", err), stdin.Close())
+	}
 	handle.process, err = process.Start(ctx, args, os.Environ(), stdin, handle.logs, handle.logs)
 	if closeErr := stdin.Close(); err == nil && closeErr != nil {
 		err = closeErr
 	}
 	if err != nil {
 		return fmt.Errorf("launch embedded SSM child: %w", err)
-	}
-	if _, err = lifeline.Write(append(response, '\n')); err != nil {
-		return fmt.Errorf("send SSM session to child: %w", err)
 	}
 	return nil
 }
