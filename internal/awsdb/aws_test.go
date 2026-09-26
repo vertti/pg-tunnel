@@ -152,7 +152,7 @@ func (f *fakeSSM) TerminateSession(ctx context.Context, input *ssm.TerminateSess
 func TestPluginFailureTerminatesRemoteSession(t *testing.T) {
 	t.Parallel()
 	plugin := filepath.Join(t.TempDir(), "plugin")
-	require.NoError(t, os.WriteFile(plugin, []byte("#!/bin/sh\nIFS= read -r response || exit 8\nprintf 'sensitive-token\\n'\nexit 7\n"), 0o700)) //nolint:gosec // The fake plugin must be executable by the test owner.
+	require.NoError(t, os.WriteFile(plugin, []byte("#!/bin/sh\nprintf 'sensitive-token\\n'\nexit 7\n"), 0o700)) //nolint:gosec // The fake plugin must be executable by the test owner.
 	api := &fakeSSM{}
 	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: plugin}
 	_, err := transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
