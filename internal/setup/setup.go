@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -237,7 +238,25 @@ func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error
 	if err := profile.Save(w.Path, name, p); err != nil {
 		return fmt.Errorf("save selected connection: %w", err)
 	}
-	return ui.print("Saved verified connection %q to %q. Connect with:\n  pg-tunnel connect --config %s %s\n", name, w.Path, ShellQuote(w.Path), ShellQuote(name))
+	return ui.print("Saved verified connection %q to %q. Connect with:\n  %s\n", name, w.Path, connectCommand(w.Path, name))
+}
+
+// connectCommand omits --config when run would select path by itself.
+func connectCommand(path, name string) string {
+	command := "pg-tunnel run "
+	if !selectedByDefault(path) {
+		command += "--config " + ShellQuote(path) + " "
+	}
+	return command + ShellQuote(name) + " -- psql"
+}
+
+func selectedByDefault(path string) bool {
+	user, err := profile.UserPath()
+	if err != nil || path != user {
+		return false
+	}
+	_, err = os.Lstat("pg-tunnel.json")
+	return errors.Is(err, os.ErrNotExist)
 }
 
 func (w *Wizard) verify(ctx context.Context, ui *prompt, p *profile.Profile) error {

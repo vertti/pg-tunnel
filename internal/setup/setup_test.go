@@ -259,6 +259,7 @@ func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
 				require.NoError(t, loadErr)
 				assert.Equal(t, ca, saved.RootCert, "verification must not change saved settings")
 				assert.Contains(t, output.String(), "Saved verified connection")
+				assert.Contains(t, output.String(), "pg-tunnel run --config "+setup.ShellQuote(path)+" 'readonly' -- psql")
 				assert.NotContains(t, output.String(), "Verify access with")
 				return
 			}
