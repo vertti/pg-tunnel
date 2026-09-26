@@ -12,7 +12,6 @@ The quickest install is `brew install vertti/tap/pg-tunnel` or
 | Linux, ARM64 | `pg-tunnel_linux_arm64.tar.xz` |
 | Linux, x86-64 | `pg-tunnel_linux_amd64.tar.xz` |
 
-Older releases use `.tar.gz`; use the filename from your release.
 
 Download your archive and `checksums.txt` from the same release. For example,
 on Apple Silicon, run in the download directory:
