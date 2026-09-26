@@ -79,7 +79,7 @@ of the underlying AWS credentials.
 
 Release archives contain one binary plus licenses and notices. Builds disable
 CGO and strip symbols; Linux binaries use UPX and all archives use `tar.xz`.
-CI enforces a 25 MiB binary limit and tests packages on macOS/Linux amd64/arm64.
+CI enforces a 25 MiB binary limit and tests packages on Linux amd64/arm64 and macOS arm64.
 `pg-tunnel --version` reports the version and source commit.
 
 From a clean main checkout, tag the chosen version:
