@@ -19,6 +19,7 @@ import (
 	"github.com/aws/session-manager-plugin/src/sessionmanagerplugin/session"
 	_ "github.com/aws/session-manager-plugin/src/sessionmanagerplugin/session/portsession" // Register AWS's port forwarding handler only.
 	"github.com/aws/session-manager-plugin/src/sessionmanagerplugin/session/sessionutil"
+	"github.com/cihub/seelog"
 	"github.com/twinj/uuid"
 )
 
@@ -44,13 +45,19 @@ func Run(args []string, output io.Writer) error {
 	// The supervisor sends SIGTERM; upstream otherwise bypasses its graceful handler.
 	sessionutil.ControlSignals = append(sessionutil.ControlSignals, syscall.SIGTERM)
 	go StopWhenSupervisorExits(stdin)
-	logger := log.Logger(true, "session-manager-plugin")
+	logger := quietLogger{seelog.Disabled}
 	s.DataChannel = &recoveryChannel{DataChannel: &datachannel.DataChannel{}, resume: func() error { return s.ResumeSessionHandler(logger) }, output: output}
 	if err := s.Execute(logger); err != nil {
 		return fmt.Errorf("start embedded SSM session: %w", err)
 	}
 	return nil
 }
+
+// quietLogger keeps upstream from reading and watching a seelog.xml it does not own.
+type quietLogger struct{ seelog.LoggerInterface }
+
+// WithContext returns the same disabled logger.
+func (l quietLogger) WithContext(...string) log.T { return l }
 
 // StopWhenSupervisorExits ends the session gracefully once the supervisor's end of
 // stdin closes, which also happens when the supervisor is killed.
