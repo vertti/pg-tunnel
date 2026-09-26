@@ -10,8 +10,8 @@ If recovery times out, authorization is rejected, or the SSM session no longer
 exists, pg-tunnel stops the client command and removes its temporary credentials.
 Remote cleanup errors are reported if AWS remains unreachable.
 
-Recovery has been verified for idle notebook connections. Laptop sleep and
-queries running during an outage have not been verified. If connections continue
-to fail, save your notebook work before restarting pg-tunnel and Jupyter.
+Recovery has been verified with idle and active read-only notebook queries and
+two-minute process suspension. Actual laptop sleep remains unverified. If
+connections continue to fail, save your work before restarting pg-tunnel and Jupyter.
 
 Maintainers can run the [live recovery checks](development.md#live-checks).

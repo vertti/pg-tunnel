@@ -55,6 +55,12 @@ mise x uv@0.12.10 -- uv run scripts/check-jupyter-recovery.py \
 # A longer interruption must stop the kernel and clean up:
 mise x uv@0.12.10 -- uv run scripts/check-jupyter-recovery.py \
   --config /path/to/pg-tunnel.json --outage 75 --expect-stop reader
+# A query timeout during recovery must return; a fresh connection must work:
+mise x uv@0.12.10 -- uv run scripts/check-jupyter-recovery.py \
+  --config /path/to/pg-tunnel.json --outage 30 --active-query reader
+# Suspend only the test process tree, then require recovery (not real OS sleep):
+mise x uv@0.12.10 -- uv run scripts/check-jupyter-recovery.py \
+  --config /path/to/pg-tunnel.json --suspend 120 reader
 ```
 
 The script starts a disposable Jupyter server and interrupts only its SSM
