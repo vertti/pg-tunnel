@@ -173,6 +173,9 @@ func awsConfig(ctx context.Context, p *profile.Profile) (aws.Config, error) {
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, options...)
 	if err != nil {
+		if p.AWSProfile != "" {
+			return cfg, fmt.Errorf("load AWS profile %q; check it exists (aws configure list-profiles) and its login: %w", p.AWSProfile, err)
+		}
 		return cfg, fmt.Errorf("load AWS configuration; check your AWS profile or SSO login: %w", err)
 	}
 	if cfg.Region == "" {

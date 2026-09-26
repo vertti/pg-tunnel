@@ -162,7 +162,7 @@ func TestProductionWarningBeforeConnection(t *testing.T) {
 		require.NoError(t, profile.Save(path, "test", &p))
 		var output bytes.Buffer
 		err := RunContext(t.Context(), []string{"connect", "--config", path, "test"}, io.Discard, &output)
-		require.ErrorContains(t, err, "load AWS configuration")
+		require.ErrorContains(t, err, `load AWS profile "missing-test-profile"; check it exists (aws configure list-profiles)`)
 		assert.Equal(t, environment == "production", strings.Contains(output.String(), "WARNING: PRODUCTION"))
 	}
 }
