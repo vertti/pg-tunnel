@@ -118,24 +118,9 @@ pg-tunnel check development
 pg-tunnel check --config /path/to/pg-tunnel.json development
 ```
 
-`check` uses the same AWS credentials, discovery, SSM tunnel, TLS and database
-login as `run`. It reports the database identity, credential expiry when available,
-and access warnings, then removes its temporary credentials and closes the tunnel.
-It launches no client, changes no saved configuration, and prints no shell exports.
-Diagnostics and the final result go to stderr; stdout stays empty.
-
-Exit status is 0 only after verification and cleanup succeed, 1 for a connection
-or cleanup failure, and 2 for incorrect command usage. Signals use the usual
-128-plus-signal status. Errors name the failed stage; a remote timeout does not
-establish whether DNS, routing or a security group caused it. Successful cleanup
-means SSM accepted termination (or an already-terminated session was confirmed),
-not that AWS's asynchronous status has necessarily reached `Terminated` yet.
-
-**Smallest concrete check:** run it against an existing read-only connection and
-require the final success message. In a copy of that configuration, use a database
-name that does not exist: require a database authentication error, a nonzero exit,
-no success message, and no remaining local listener or new session directory under
-the OS user cache's `pg-tunnel/sessions` path in either case.
+`check` verifies AWS access, the tunnel and database login, then cleans up and
+exits without launching a client. It reports failures on stderr and returns a
+nonzero exit status if verification or cleanup fails.
 
 ## Secrets Manager passwords
 

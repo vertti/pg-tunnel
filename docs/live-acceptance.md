@@ -113,17 +113,3 @@ behavior, not the exact server-side expiry cutoff or rejection of stale IAM
 tokens. The local PostgreSQL regression test separately proves that the example
 reloads a replacement password when the original password no longer works.
 Underlying AWS credentials did not expire during this run.
-
-## Saved-connection check
-
-On 2026-09-26, the source implementation of `pg-tunnel check` (based on `b55c38e`)
-was tested on macOS arm64 against the existing read-only IAM connection.
-The valid connection completed TLS authentication, printed the final success
-message and exited 0. A copied configuration naming a nonexistent database
-failed at database authentication with PostgreSQL `3D000`, exited 1 and printed
-no success message. Neither command wrote client settings to stdout.
-
-After each command, no new credential directory remained and its local port
-refused connections. A separate read-only SSM audit confirmed both sessions
-reached `Terminated`. This was an IAM check; it did not repeat live Secrets
-Manager authentication or test credential renewal.
