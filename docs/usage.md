@@ -61,7 +61,9 @@ other secrets require an explicit database user.
 | Setting | Meaning |
 | --- | --- |
 | `db_instance` | Discover an RDS PostgreSQL instance's endpoint and port. |
-| `host` | Alternative explicit database endpoint; mutually exclusive with `db_instance`. |
+| `db_cluster` | Discover an Aurora PostgreSQL cluster endpoint and port. |
+| `cluster_endpoint` | `writer` (default) or `reader`; requires `db_cluster`. |
+| `host` | Explicit database endpoint. Set exactly one of `db_instance`, `db_cluster`, or `host`. |
 | `port` | Remote port for an explicit host, default `5432`. |
 | `database`, `user` | PostgreSQL database and existing database user. |
 | `environment` | Optional `development`, `staging`, or `production`; production prints a startup warning. |
@@ -71,7 +73,7 @@ other secrets require an explicit database user.
 | `jump_tag` | Alternative EC2 `Name` tag; must match exactly one running instance. |
 | `region`, `aws_profile` | Optional overrides for the standard AWS SDK configuration. |
 | `local_port` | Optional local port; default `0` selects an available port. |
-| `sslrootcert` | Optional custom PEM trust bundle for RDS instances; required for an explicit `host`. |
+| `sslrootcert` | Optional custom PEM trust bundle for RDS instances or Aurora clusters; required for an explicit `host`. |
 
 When `sslrootcert` is omitted, `init`, `run`, and `connect` download the official
 [AWS RDS CA bundle](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html)
@@ -91,13 +93,54 @@ The SSM node must reach the database and support
 `ssm:StartSession` and `ssm:TerminateSession`; resuming an interrupted connection
 also needs `ssm:ResumeSession`. When `TerminateSession` fails,
 `ssm:DescribeSessions` confirms the session already ended; without it, that
-cleanup reports an error. Discovery also needs `rds:DescribeDBInstances` and,
-when using a jump tag, `ec2:DescribeInstances`. IAM authentication additionally
-needs `rds-db:connect`, IAM enabled on the instance, and `rds_iam` granted to the
-database user. Password authentication needs `secretsmanager:GetSecretValue` for
-the selected secret and `kms:Decrypt` when it uses a customer-managed KMS key. The
-user's SQL permissions are defined in PostgreSQL; the utility does not grant read
-or write access.
+cleanup reports an error. Discovery also needs `rds:DescribeDBInstances` for
+`db_instance` or `rds:DescribeDBClusters` for `db_cluster`, and
+`ec2:DescribeInstances` when using a jump tag. IAM authentication additionally
+needs `rds-db:connect`, IAM enabled on the instance or cluster, and `rds_iam`
+granted to the database user. Password authentication needs
+`secretsmanager:GetSecretValue` for the selected secret and `kms:Decrypt` when it
+uses a customer-managed KMS key. The user's SQL permissions are defined in
+PostgreSQL; the utility does not grant read or write access.
+
+### Aurora cluster endpoints
+
+Configure a cluster directly in your `pg-tunnel.json`:
+
+```json
+{
+  "profiles": {
+    "analytics": {
+      "db_cluster": "my-cluster",
+      "cluster_endpoint": "reader",
+      "database": "app",
+      "user": "app_reader",
+      "target": "i-your-ssm-host",
+      "region": "eu-central-1"
+    }
+  }
+}
+```
+
+Use `writer` (or omit `cluster_endpoint`) for the cluster's writer endpoint.
+Each new `run` or `connect` looks up the selected AWS endpoint; that hostname is
+used for SSM forwarding, IAM signing and TLS verification. RDS CA management
+works automatically. `init` currently lists individual instances; cluster
+selection is configured by editing the file.
+
+The [writer endpoint](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Endpoints.Cluster.html)
+routes to the primary. The
+[reader endpoint](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Endpoints.Reader.html)
+can also reach the writable primary when there are no replicas. Reader selection
+is not an access-control guarantee; use a database role with suitable permissions.
+pg-tunnel does not choose a replica itself or preserve transactions through failover.
+
+For Secrets Manager, any `host` in the secret must match the selected endpoint.
+A secret naming the writer endpoint is rejected for a reader connection. The tool
+does not relax that check or automatically select a cluster's master secret.
+See [verification status](compatibility.md#database-endpoints) before relying on
+Aurora behavior that has not been tested live.
+
+### AWS credentials
 
 For AWS Vault, omit `aws_profile` from the connection and use a renewable
 credential source:

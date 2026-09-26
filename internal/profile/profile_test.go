@@ -226,6 +226,35 @@ func TestOversizedConfigurationReportsSizeLimit(t *testing.T) {
 	require.ErrorContains(t, err, "1 MiB size limit")
 }
 
+func TestClusterProfileValidation(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ cluster, instance, host, endpoint, want string }{
+		{cluster: "analytics"},
+		{cluster: "analytics", endpoint: profile.ClusterWriter},
+		{cluster: "analytics", endpoint: profile.ClusterReader},
+		{want: "exactly one"},
+		{cluster: "analytics", instance: "instance", want: "exactly one"},
+		{cluster: "analytics", host: "db.example", want: "exactly one"},
+		{instance: "instance", endpoint: profile.ClusterReader, want: "requires db_cluster"},
+		{cluster: "analytics", endpoint: "readre", want: "writer or reader"},
+		{cluster: "analytics\nsslmode=disable", want: "without control characters"},
+	} {
+		p := profile.Profile{DBCluster: tc.cluster, DBInstance: tc.instance, Host: tc.host, ClusterEndpoint: tc.endpoint, Database: "data", User: "reader", Target: "i-test", Port: 5432}
+		err := p.Validate()
+		if tc.want != "" {
+			require.ErrorContains(t, err, tc.want)
+		} else {
+			require.NoError(t, err)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	value := profile.Profile{DBCluster: "analytics", ClusterEndpoint: profile.ClusterReader, Database: "data", User: "reader", Target: "i-test", Port: 5432}
+	require.NoError(t, profile.Save(path, "analytics", &value))
+	loaded, err := profile.Load(path, "analytics")
+	require.NoError(t, err)
+	assert.Equal(t, value, loaded, "cluster configuration round-trips without a manually configured CA")
+}
+
 func TestMissingConnectionListsAvailableNames(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "profiles.json")

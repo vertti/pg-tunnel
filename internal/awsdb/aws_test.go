@@ -35,6 +35,11 @@ func (f rdsFunc) DescribeDBInstances(ctx context.Context, input *rds.DescribeDBI
 	return f(ctx, input)
 }
 
+// DescribeDBClusters rejects accidental cluster lookups in instance tests.
+func (rdsFunc) DescribeDBClusters(context.Context, *rds.DescribeDBClustersInput, ...func(*rds.Options)) (*rds.DescribeDBClustersOutput, error) {
+	return nil, errors.New("unexpected cluster discovery")
+}
+
 func TestRDSDiscovery(t *testing.T) {
 	t.Parallel()
 	api := rdsFunc(func(_ context.Context, input *rds.DescribeDBInstancesInput) (*rds.DescribeDBInstancesOutput, error) {
