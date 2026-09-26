@@ -13,6 +13,13 @@ import (
 // ErrUsage marks command-line mistakes, which exit with status 2.
 var ErrUsage = errors.New("usage")
 
+type usageErr string
+
+func (e usageErr) Error() string { return string(e) }
+
+// Is makes errors.Is match ErrUsage without printing its text.
+func (usageErr) Is(target error) bool { return target == ErrUsage }
+
 const help = `pg-tunnel connects PostgreSQL clients to private AWS RDS databases through SSM.
 
 Usage:
@@ -33,7 +40,7 @@ Options:
 `
 
 func usageError(format string, args ...any) error {
-	return fmt.Errorf("%w: %s (see pg-tunnel --help)", ErrUsage, fmt.Sprintf(format, args...))
+	return usageErr(fmt.Sprintf(format, args...) + " (see pg-tunnel --help)")
 }
 
 // RunContext executes commands until completion or cancellation. Requested help,
@@ -48,24 +55,22 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	case "init":
 		return initProfile(ctx, args[1:], stdout, stderr)
 	case "cleanup":
-		if len(args) != 1 {
-			return usageError("cleanup takes no arguments")
-		}
-		return cleanup(stderr)
+		return cleanupCommand(args[1:], stdout, stderr)
 	case "help":
-		return rootOptions([]string{"--help"}, stdout, stderr)
+		return rootOptions([]string{"--help"}, stdout)
 	}
 	if args[0] == "" || args[0][0] != '-' {
 		return usageError("unknown command %q", args[0])
 	}
-	return rootOptions(args, stdout, stderr)
+	return rootOptions(args, stdout)
 }
 
-// parseFlags prints usage to stdout when help is requested and to stderr after a flag error.
-func parseFlags(flags *flag.FlagSet, args []string, stdout, stderr io.Writer) (help bool, _ error) {
+// parseFlags prints usage to stdout when help is requested; a flag error becomes
+// one line pointing at the command's help.
+func parseFlags(flags *flag.FlagSet, args []string, stdout io.Writer) (help bool, _ error) {
 	usage := flags.Usage
 	flags.Usage = func() {}
-	flags.SetOutput(stderr)
+	flags.SetOutput(io.Discard)
 	err := flags.Parse(args)
 	if errors.Is(err, flag.ErrHelp) {
 		flags.SetOutput(stdout)
@@ -73,13 +78,16 @@ func parseFlags(flags *flag.FlagSet, args []string, stdout, stderr io.Writer) (h
 		return true, nil
 	}
 	if err != nil {
-		usage()
-		return false, fmt.Errorf("%w: %w", ErrUsage, err)
+		command := "pg-tunnel " + flags.Name()
+		if flags.Name() == "pg-tunnel" {
+			command = "pg-tunnel"
+		}
+		return false, usageErr(fmt.Sprintf("%v (see %s --help)", err, command))
 	}
 	return false, nil
 }
 
-func rootOptions(args []string, stdout, stderr io.Writer) error {
+func rootOptions(args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("pg-tunnel", flag.ContinueOnError)
 	flags.Usage = func() {
 		fmt.Fprint(flags.Output(), help) //nolint:errcheck // flag.Usage has no error return; normal command output errors are returned separately.
@@ -87,7 +95,7 @@ func rootOptions(args []string, stdout, stderr io.Writer) error {
 	}
 	version := flags.Bool("version", false, "print version and build commit")
 
-	if help, err := parseFlags(flags, args, stdout, stderr); help || err != nil {
+	if help, err := parseFlags(flags, args, stdout); help || err != nil {
 		return err
 	}
 	if flags.NArg() > 0 {
