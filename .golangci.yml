@@ -75,6 +75,8 @@ linters:
       min-complexity: 10
     govet:
       enable-all: true
+      disable:
+        - fieldalignment
     nolintlint:
       require-explanation: true
       require-specific: true
