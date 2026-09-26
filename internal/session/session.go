@@ -30,11 +30,6 @@ func (Credential) String() string { return "[redacted credential]" }
 // GoString also redacts Go-syntax formatting.
 func (c Credential) GoString() string { return c.String() }
 
-// Resolver discovers the database endpoint.
-type Resolver interface {
-	Resolve(context.Context) (Target, error)
-}
-
 // Auth obtains a fresh credential using the current identity.
 type Auth interface {
 	Credential(context.Context, Target) (Credential, error)
@@ -74,7 +69,6 @@ type Command func(context.Context, []string) error
 
 // Runner composes providers while retaining sole ownership of cleanup.
 type Runner struct {
-	Resolver  Resolver
 	Transport Transport
 	Auth      Auth
 	Clients   Clients
@@ -82,16 +76,14 @@ type Runner struct {
 	Command   Command
 	Report    func(string)
 	Env       []string
+	Target    Target
 }
 
 // Run starts a database session, runs its command, and closes every resource.
 func (r *Runner) Run(ctx context.Context) (result error) {
 	startupCtx, startupCancel := context.WithTimeout(ctx, time.Minute)
 	defer startupCancel()
-	target, err := r.Resolver.Resolve(startupCtx)
-	if err != nil {
-		return fmt.Errorf("discover database: %w", err)
-	}
+	target := r.Target
 	r.report(fmt.Sprintf("Database: %s:%d (%s, user %s)", target.Host, target.Port, target.Database, target.User))
 
 	tunnel, err := r.Transport.Open(startupCtx, target)

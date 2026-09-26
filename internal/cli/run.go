@@ -107,14 +107,9 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	if err != nil {
 		return err
 	}
-	if p.RootCert == "" {
-		p.RootCert, err = awsdb.RDSCA(setupCtx, cfg.Region, report)
-		if err != nil {
-			return fmt.Errorf("prepare RDS certificates: %w", err)
-		}
-	}
-	if _, err = libpq.TLSConfig(session.Target{RootCert: p.RootCert}); err != nil {
-		return fmt.Errorf("validate CA certificate: %w", err)
+	err = prepareRootCert(setupCtx, p, cfg.Region, report)
+	if err != nil {
+		return err
 	}
 	jump, err := awsdb.JumpHost(setupCtx, ec2.NewFromConfig(cfg), p)
 	if err != nil {
@@ -128,8 +123,12 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	if err != nil {
 		return err
 	}
+	target, err := (&awsdb.Resolver{API: rds.NewFromConfig(cfg), Profile: p}).Resolve(setupCtx)
+	if err != nil {
+		return fmt.Errorf("discover database: %w", err)
+	}
 	runner := session.Runner{
-		Resolver:  &awsdb.Resolver{API: rds.NewFromConfig(cfg), Profile: p},
+		Target:    target,
 		Transport: &awsdb.SSM{API: ssm.NewFromConfig(cfg), Region: cfg.Region, Profile: p.AWSProfile, Target: jump, LocalPort: p.LocalPort, Report: report},
 		Auth:      authentication,
 		Clients:   libpq.Files{Root: root}, Verify: libpq.Verify, Env: os.Environ(), Report: report,
@@ -137,6 +136,19 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	}
 	if err = runner.Run(ctx); err != nil {
 		return fmt.Errorf("database session: %w", err)
+	}
+	return nil
+}
+
+func prepareRootCert(ctx context.Context, p *profile.Profile, region string, report func(string)) error {
+	if p.RootCert == "" {
+		var err error
+		if p.RootCert, err = awsdb.RDSCA(ctx, region, report); err != nil {
+			return fmt.Errorf("prepare RDS certificates: %w", err)
+		}
+	}
+	if _, err := libpq.TLSConfig(session.Target{RootCert: p.RootCert}); err != nil {
+		return fmt.Errorf("validate CA certificate: %w", err)
 	}
 	return nil
 }
