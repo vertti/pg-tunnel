@@ -58,8 +58,22 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 	if err != nil {
 		return fmt.Errorf("load connection profile: %w", err)
 	}
+	if mode == "check" {
+		return checkConnection(ctx, &p, stderr)
+	}
 	report := reporter(stderr)
 	return execute(ctx, &p, sessionCommand(command, stdout, report), report)
+}
+
+func checkConnection(ctx context.Context, p *profile.Profile, output io.Writer) error {
+	verified := func(ctx context.Context, _ []string) error { return ctx.Err() }
+	if err := execute(ctx, p, verified, reporter(output)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(output, "Connection check passed; local tunnel and temporary credentials cleaned up."); err != nil {
+		return fmt.Errorf("write check result: %w", err)
+	}
+	return nil
 }
 
 func reporter(output io.Writer) func(string) {
@@ -70,6 +84,7 @@ func reporter(output io.Writer) func(string) {
 var sessionSyntax = map[string]string{
 	"run":     "run [--config PATH] CONNECTION -- COMMAND [ARGS...]",
 	"connect": "connect [--config PATH] CONNECTION",
+	"check":   "check [--config PATH] CONNECTION",
 }
 
 func sessionArguments(mode string, args []string) (name string, command []string, err error) {
@@ -80,9 +95,9 @@ func sessionArguments(mode string, args []string) (name string, command []string
 	if len(rest) > 0 && strings.HasPrefix(rest[0], "--config") {
 		return "", nil, usageError("put --config before the connection name")
 	}
-	if mode == "connect" {
+	if mode != "run" {
 		if len(rest) > 0 {
-			return "", nil, usageError("connect takes only a CONNECTION name")
+			return "", nil, usageError("%s takes only a CONNECTION name", mode)
 		}
 		return name, nil, nil
 	}

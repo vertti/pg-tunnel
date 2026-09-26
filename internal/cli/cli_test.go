@@ -25,7 +25,7 @@ func TestVersion(t *testing.T) {
 func TestHelp(t *testing.T) {
 	t.Parallel()
 
-	for _, args := range [][]string{{"--help"}, {"help"}, {"run", "--help"}, {"connect", "-h"}} {
+	for _, args := range [][]string{{"--help"}, {"help"}, {"run", "--help"}, {"connect", "-h"}, {"check", "--help"}} {
 		var stdout, stderr bytes.Buffer
 		require.NoError(t, cli.RunContext(t.Context(), args, &stdout, &stderr))
 		assert.Contains(t, stdout.String(), "Usage:")
@@ -33,7 +33,7 @@ func TestHelp(t *testing.T) {
 	}
 	var stdout bytes.Buffer
 	require.NoError(t, cli.RunContext(t.Context(), []string{"--help"}, &stdout, io.Discard))
-	for _, want := range []string{"pg-tunnel run [--config PATH] CONNECTION -- COMMAND", "pg-tunnel connect", "pg-tunnel init", "pg-tunnel cleanup", "-version"} {
+	for _, want := range []string{"pg-tunnel run [--config PATH] CONNECTION -- COMMAND", "pg-tunnel connect", "pg-tunnel check", "pg-tunnel init", "pg-tunnel cleanup", "-version"} {
 		assert.Contains(t, stdout.String(), want)
 	}
 }
@@ -47,6 +47,9 @@ func TestUsageMistakesExplainTheFix(t *testing.T) {
 		{"missing command", nil},
 		{`unknown command "bogus"`, []string{"bogus"}},
 		{"connect needs a CONNECTION name", []string{"connect"}},
+		{"check needs a CONNECTION name", []string{"check"}},
+		{"check takes only a CONNECTION name", []string{"check", "dev", "--", "psql"}},
+		{"put --config before the connection name", []string{"check", "dev", "--config", "other.json"}},
 		{"put -- between the connection name and the command: pg-tunnel run dev -- psql", []string{"run", "dev", "psql"}},
 		{"run needs a command", []string{"run", "dev"}},
 		{"missing command after --", []string{"run", "dev", "--"}},
@@ -119,7 +122,7 @@ func (writer failingWriter) Write([]byte) (int, error) {
 
 func TestEmptyExplicitConfigIsRejected(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"run", "connect"} {
+	for _, mode := range []string{"run", "connect", "check"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			err := cli.RunContext(t.Context(), []string{mode, "--config=", "dev"}, io.Discard, io.Discard)

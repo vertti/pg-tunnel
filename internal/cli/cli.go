@@ -20,6 +20,8 @@ Usage:
       Open a tunnel, run COMMAND with libpq settings, and clean up when it exits.
   pg-tunnel connect [--config PATH] CONNECTION
       Keep a tunnel open and print settings for separately launched clients.
+  pg-tunnel check [--config PATH] CONNECTION
+      Verify a saved connection and clean up before exiting.
   pg-tunnel init [--aws-profile PROFILE] [--region REGION] [--config PATH] [--sslrootcert PEM]
       Discover AWS resources, test the connection, and save it.
   pg-tunnel cleanup
@@ -43,7 +45,7 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		return usageError("missing command")
 	}
 	switch args[0] {
-	case "run", "connect":
+	case "run", "connect", "check":
 		return runSession(ctx, args[0], args[1:], stdout, stderr)
 	case "init":
 		return initProfile(ctx, args[1:], stdout, stderr)

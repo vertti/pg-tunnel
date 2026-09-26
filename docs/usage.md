@@ -1,10 +1,10 @@
 # Configuration and usage
 
-A connection (the `CONNECTION` argument of `run` and `connect`) is a named entry
+A connection (the `CONNECTION` argument of `run`, `connect`, and `check`) is a named entry
 under `profiles` in `pg-tunnel.json`. It is unrelated to AWS profiles, which
 select AWS credentials.
 
-Both `run` and `connect` select one configuration file, in this order:
+`run`, `connect`, and `check` select one configuration file, in this order:
 
 1. The explicit `--config PATH`, if supplied before the profile name.
 2. `pg-tunnel.json` in the current directory.
@@ -110,6 +110,32 @@ Static temporary credentials in environment variables cannot refresh themselves.
 The utility reports AWS credential expiry when available and recognizes
 `AWS_CREDENTIAL_EXPIRATION` for environment credentials. SSO sessions can also
 require a fresh login after their underlying login session expires.
+
+## Check a saved connection
+
+```sh
+pg-tunnel check development
+pg-tunnel check --config /path/to/pg-tunnel.json development
+```
+
+`check` uses the same AWS credentials, discovery, SSM tunnel, TLS and database
+login as `run`. It reports the database identity, credential expiry when available,
+and access warnings, then removes its temporary credentials and closes the tunnel.
+It launches no client, changes no saved configuration, and prints no shell exports.
+Diagnostics and the final result go to stderr; stdout stays empty.
+
+Exit status is 0 only after verification and cleanup succeed, 1 for a connection
+or cleanup failure, and 2 for incorrect command usage. Signals use the usual
+128-plus-signal status. Errors name the failed stage; a remote timeout does not
+establish whether DNS, routing or a security group caused it. Successful cleanup
+means SSM accepted termination (or an already-terminated session was confirmed),
+not that AWS's asynchronous status has necessarily reached `Terminated` yet.
+
+**Smallest concrete check:** run it against an existing read-only connection and
+require the final success message. In a copy of that configuration, use a database
+name that does not exist: require a database authentication error, a nonzero exit,
+no success message, and no remaining local listener or new session directory under
+the OS user cache's `pg-tunnel/sessions` path in either case.
 
 ## Secrets Manager passwords
 
