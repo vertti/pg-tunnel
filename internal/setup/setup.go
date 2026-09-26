@@ -40,9 +40,6 @@ type prompt struct {
 // Run previews a profile, then verifies and saves it after explicit confirmation.
 // Input must honor cancellation; the CLI supplies a cancellable terminal reader.
 func (w *Wizard) Run(ctx context.Context) error {
-	if w.Verify == nil {
-		return errors.New("setup requires a connection verifier")
-	}
 	ui := prompt{input: bufio.NewScanner(w.Input), output: w.Output}
 	id, err := account(ctx, &w.Config)
 	if err != nil {
