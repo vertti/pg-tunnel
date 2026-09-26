@@ -42,7 +42,7 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 		path = value
 		return nil
 	})
-	if help, err := parseFlags(flags, args, stdout, stderr); help || err != nil {
+	if help, err := parseFlags(flags, args, stdout); help || err != nil {
 		return err
 	}
 	name, command, err := sessionArguments(mode, flags.Args())
@@ -225,6 +225,20 @@ func sessionRoot() (string, error) {
 		return "", fmt.Errorf("find user cache directory: %w", err)
 	}
 	return filepath.Join(cache, "pg-tunnel", "sessions"), nil
+}
+
+func cleanupCommand(args []string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("cleanup", flag.ContinueOnError)
+	flags.Usage = func() {
+		fmt.Fprintln(flags.Output(), "Usage: pg-tunnel cleanup\n\nRemove credential files left behind by crashed sessions.") //nolint:errcheck // flag.Usage has no error return.
+	}
+	if help, err := parseFlags(flags, args, stdout); help || err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return usageError("cleanup takes no arguments")
+	}
+	return cleanup(stderr)
 }
 
 func cleanup(output io.Writer) error {
