@@ -74,9 +74,9 @@ func TestSaveRejectsInvalidInputBeforeWriting(t *testing.T) {
 	path := filepath.Join(directory, "profiles.json")
 	valid := profile.Profile{DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432}
 	for _, name := range []string{"", " padded", "line\nbreak"} {
-		require.ErrorContains(t, profile.Save(path, name, &valid), "profile name")
+		require.ErrorContains(t, profile.Save(path, name, &valid), "connection name")
 	}
-	require.ErrorContains(t, profile.Save(path, "dev", &profile.Profile{}), "validate profile to save")
+	require.ErrorContains(t, profile.Save(path, "dev", &profile.Profile{}), "validate connection to save")
 	blocker := filepath.Join(directory, "file")
 	require.NoError(t, os.WriteFile(blocker, nil, 0o600))
 	require.ErrorContains(t, profile.Save(filepath.Join(blocker, "profiles.json"), "dev", &valid), "create configuration directory")
@@ -93,4 +93,19 @@ func TestSaveRefusesToGrowPastSizeLimit(t *testing.T) {
 	actual, err := os.ReadFile(path) //nolint:gosec // The path is inside t.TempDir.
 	require.NoError(t, err)
 	assert.Equal(t, content, string(actual))
+}
+
+func TestSaveWritesOnlySetFieldsInReadingOrder(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	p := profile.Profile{DBInstance: "orders-db", Port: 5432, Database: "orders", User: "reader", Target: "i-0abc", Region: "eu-central-1"}
+	require.NoError(t, profile.Save(path, "orders", &p))
+	saved, err := os.ReadFile(path) //nolint:gosec // The path is inside t.TempDir.
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"profiles":{"orders":{"db_instance":"orders-db","port":5432,"database":"orders","user":"reader","target":"i-0abc","region":"eu-central-1"}}}`, string(saved))
+	text := string(saved)
+	keys := []string{`"db_instance"`, `"port"`, `"database"`, `"user"`, `"target"`, `"region"`}
+	for i := 1; i < len(keys); i++ {
+		assert.Less(t, strings.Index(text, keys[i-1]), strings.Index(text, keys[i]))
+	}
 }

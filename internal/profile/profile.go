@@ -25,22 +25,30 @@ const (
 	EnvironmentProduction  = "production"
 )
 
+// Cluster endpoint choices select AWS-managed Aurora endpoints.
+const (
+	ClusterWriter = "writer"
+	ClusterReader = "reader"
+)
+
 // Profile configures a database session without storing credentials.
 type Profile struct {
-	Environment string `json:"environment,omitempty"`
-	Auth        string `json:"auth,omitempty"`
-	SecretID    string `json:"secret_id,omitempty"`
-	DBInstance  string `json:"db_instance"`
-	Host        string `json:"host"`
-	Database    string `json:"database"`
-	User        string `json:"user"`
-	Target      string `json:"target"`
-	JumpTag     string `json:"jump_tag"`
-	Region      string `json:"region"`
-	AWSProfile  string `json:"aws_profile"`
-	RootCert    string `json:"sslrootcert,omitempty"`
-	Port        int    `json:"port"`
-	LocalPort   int    `json:"local_port"`
+	DBInstance      string `json:"db_instance,omitempty"`
+	DBCluster       string `json:"db_cluster,omitempty"`
+	ClusterEndpoint string `json:"cluster_endpoint,omitempty"`
+	Host            string `json:"host,omitempty"`
+	Port            int    `json:"port,omitempty"`
+	Database        string `json:"database"`
+	User            string `json:"user"`
+	Auth            string `json:"auth,omitempty"`
+	SecretID        string `json:"secret_id,omitempty"`
+	Environment     string `json:"environment,omitempty"`
+	Target          string `json:"target,omitempty"`
+	JumpTag         string `json:"jump_tag,omitempty"`
+	Region          string `json:"region,omitempty"`
+	AWSProfile      string `json:"aws_profile,omitempty"`
+	LocalPort       int    `json:"local_port,omitempty"`
+	RootCert        string `json:"sslrootcert,omitempty"`
 }
 
 // Load reads one named profile; certificate paths are relative to its file.
@@ -56,7 +64,7 @@ func Load(path, name string) (Profile, error) {
 	}
 	// A cloned repository could otherwise trust a CA it controls with the user's credentials.
 	if project && (value.Host != "" || value.RootCert != "") {
-		return Profile{}, fmt.Errorf("profile %q in %s sets host or sslrootcert, which a pg-tunnel.json found in the current directory may not do; trust this file with --config %s", name, path, path)
+		return Profile{}, fmt.Errorf("connection %q in %s sets host or sslrootcert, which a pg-tunnel.json found in the current directory may not do; trust this file with --config %s", name, path, path)
 	}
 	return value, nil
 }
@@ -87,7 +95,7 @@ type configuration struct {
 func readConfig(path string) (configuration, error) {
 	file, err := os.Open(path) //nolint:gosec // The path is an explicit configuration file or a documented default location.
 	if err != nil {
-		return configuration{}, fmt.Errorf("open profiles %s: %w", path, err)
+		return configuration{}, fmt.Errorf("open configuration %s: %w", path, err)
 	}
 	defer file.Close() //nolint:errcheck // This file is read-only.
 	var config configuration
@@ -102,7 +110,7 @@ func readConfig(path string) (configuration, error) {
 		return configuration{}, errors.New("configuration exceeds the 1 MiB size limit")
 	}
 	if err != nil {
-		return configuration{}, fmt.Errorf("decode profiles %s: %w", path, err)
+		return configuration{}, fmt.Errorf("decode configuration %s: %w", path, err)
 	}
 	return config, nil
 }
@@ -114,13 +122,13 @@ func load(path, name string) (Profile, error) {
 	}
 	value, ok := config.Profiles[name]
 	if !ok {
-		return Profile{}, fmt.Errorf("profile %q does not exist in %s; %s", name, path, available(config.Profiles))
+		return Profile{}, fmt.Errorf("connection %q does not exist in %s; %s", name, path, available(config.Profiles))
 	}
 	if value.Port == 0 {
 		value.Port = 5432
 	}
 	if err = value.Validate(); err != nil {
-		return Profile{}, fmt.Errorf("profile %q in %s: %w", name, path, err)
+		return Profile{}, fmt.Errorf("connection %q in %s: %w", name, path, err)
 	}
 	if value.RootCert == "" {
 		return value, nil
@@ -144,8 +152,8 @@ func available(profiles map[string]Profile) string {
 
 // Validate rejects ambiguous discovery and unsafe client-file values.
 func (p *Profile) Validate() error {
-	if (p.DBInstance == "") == (p.Host == "") {
-		return errors.New("set exactly one of db_instance or host")
+	if err := p.validateSource(); err != nil {
+		return err
 	}
 	if (p.Target == "") == (p.JumpTag == "") {
 		return errors.New("set exactly one of target (SSM instance ID) or jump_tag (EC2 Name tag)")
@@ -164,12 +172,12 @@ func (p *Profile) Validate() error {
 
 func (p *Profile) validateText() error {
 	if p.Host != "" && p.RootCert == "" {
-		return errors.New("sslrootcert is required for an explicit host; RDS instance profiles can use automatic certificates")
+		return errors.New("sslrootcert is required for an explicit host; RDS instance and cluster connections can use automatic certificates")
 	}
 
-	for _, value := range []string{p.DBInstance, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert, p.SecretID} {
+	for _, value := range []string{p.DBInstance, p.DBCluster, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert, p.SecretID} {
 		if !plainText(value) {
-			return errors.New("profile values must be UTF-8 without control characters or surrounding whitespace")
+			return errors.New("connection values must be UTF-8 without control characters or surrounding whitespace")
 		}
 	}
 	if strings.ContainsAny(p.Host, "/:, \\*") || strings.ContainsAny(p.Database, "*") || strings.ContainsAny(p.User, "*") {
@@ -201,6 +209,27 @@ func (p *Profile) validateOptions() error {
 		}
 	default:
 		return errors.New("auth must be iam or secrets-manager")
+	}
+	return nil
+}
+
+func (p *Profile) validateSource() error {
+	sources := 0
+	for _, value := range []string{p.DBInstance, p.DBCluster, p.Host} {
+		if value != "" {
+			sources++
+		}
+	}
+	if sources != 1 {
+		return errors.New("set exactly one of db_instance, db_cluster, or host")
+	}
+	if p.ClusterEndpoint != "" {
+		if p.DBCluster == "" {
+			return errors.New("cluster_endpoint requires db_cluster")
+		}
+		if p.ClusterEndpoint != ClusterWriter && p.ClusterEndpoint != ClusterReader {
+			return errors.New("cluster_endpoint must be writer or reader (default writer)")
+		}
 	}
 	return nil
 }

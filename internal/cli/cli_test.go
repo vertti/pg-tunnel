@@ -25,7 +25,7 @@ func TestVersion(t *testing.T) {
 func TestHelp(t *testing.T) {
 	t.Parallel()
 
-	for _, args := range [][]string{{"--help"}, {"help"}, {"run", "--help"}, {"connect", "-h"}, {"check", "--help"}} {
+	for _, args := range [][]string{{"--help"}, {"help"}, {"run", "--help"}, {"connect", "-h"}, {"check", "--help"}, {"cleanup", "--help"}} {
 		var stdout, stderr bytes.Buffer
 		require.NoError(t, cli.RunContext(t.Context(), args, &stdout, &stderr))
 		assert.Contains(t, stdout.String(), "Usage:")
@@ -65,6 +65,7 @@ func TestUsageMistakesExplainTheFix(t *testing.T) {
 			err := cli.RunContext(t.Context(), tc.args, &output, &output)
 			require.ErrorIs(t, err, cli.ErrUsage)
 			require.ErrorContains(t, err, tc.want)
+			assert.NotContains(t, err.Error(), "usage:")
 			assert.Empty(t, output.String())
 		})
 	}
@@ -80,13 +81,17 @@ func TestRunChecksCommandBeforeConnecting(t *testing.T) {
 func TestUnknownOption(t *testing.T) {
 	t.Parallel()
 
-	for _, args := range [][]string{{"--unknown"}, {"run", "--unknown"}, {"init", "--unknown"}} {
-		var stdout, stderr bytes.Buffer
-		err := cli.RunContext(t.Context(), args, &stdout, &stderr)
+	for args, want := range map[string]string{
+		"--unknown":         "flag provided but not defined: -unknown (see pg-tunnel --help)",
+		"run --unknown":     "flag provided but not defined: -unknown (see pg-tunnel run --help)",
+		"init --unknown":    "flag provided but not defined: -unknown (see pg-tunnel init --help)",
+		"cleanup --unknown": "flag provided but not defined: -unknown (see pg-tunnel cleanup --help)",
+	} {
+		var output bytes.Buffer
+		err := cli.RunContext(t.Context(), strings.Fields(args), &output, &output)
 		require.ErrorIs(t, err, cli.ErrUsage)
-		assert.Contains(t, stderr.String(), "flag provided but not defined")
-		assert.Contains(t, stderr.String(), "Usage:")
-		assert.Empty(t, stdout.String())
+		assert.Equal(t, want, err.Error(), "one line, no usage prefix")
+		assert.Empty(t, output.String(), "the error is printed once, by the caller")
 	}
 }
 

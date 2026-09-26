@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -184,7 +185,7 @@ func connectionDetails(ui *prompt, p *profile.Profile, db *rdstypes.DBInstance) 
 		}
 	}
 	if err = p.Validate(); err != nil {
-		return fmt.Errorf("validate discovered profile: %w", err)
+		return fmt.Errorf("validate discovered connection: %w", err)
 	}
 	return nil
 }
@@ -216,9 +217,9 @@ func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error
 	}
 	data, err := json.MarshalIndent(map[string]any{"profiles": map[string]profile.Profile{name: *p}}, "", "  ")
 	if err != nil {
-		return fmt.Errorf("format profile preview: %w", err)
+		return fmt.Errorf("format connection preview: %w", err)
 	}
-	if printErr := ui.print("\nHere's the configuration we would save:\n\n%s\n\nDestination: %q\nThis adds a profile; an existing name will not be replaced.\n", data, w.Path); printErr != nil {
+	if printErr := ui.print("\nHere's the configuration we would save:\n\n%s\n\nDestination: %q\nThis adds a connection; an existing name will not be replaced.\n", data, w.Path); printErr != nil {
 		return printErr
 	}
 	answer, err := ui.ask("Test and save this connection? (yes/no)", "no")
@@ -235,9 +236,27 @@ func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error
 		return err
 	}
 	if err := profile.Save(w.Path, name, p); err != nil {
-		return fmt.Errorf("save selected profile: %w", err)
+		return fmt.Errorf("save selected connection: %w", err)
 	}
-	return ui.print("Saved verified connection %q to %q. Connect with:\n  pg-tunnel connect --config %s %s\n", name, w.Path, ShellQuote(w.Path), ShellQuote(name))
+	return ui.print("Saved verified connection %q to %q. Connect with:\n  %s\n", name, w.Path, connectCommand(w.Path, name))
+}
+
+// connectCommand omits --config when run would select path by itself.
+func connectCommand(path, name string) string {
+	command := "pg-tunnel run "
+	if !selectedByDefault(path) {
+		command += "--config " + ShellQuote(path) + " "
+	}
+	return command + ShellQuote(name) + " -- psql"
+}
+
+func selectedByDefault(path string) bool {
+	user, err := profile.UserPath()
+	if err != nil || path != user {
+		return false
+	}
+	_, err = os.Lstat("pg-tunnel.json")
+	return errors.Is(err, os.ErrNotExist)
 }
 
 func (w *Wizard) verify(ctx context.Context, ui *prompt, p *profile.Profile) error {

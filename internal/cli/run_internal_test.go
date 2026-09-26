@@ -139,6 +139,7 @@ func TestSessionStopsAtFirstFailedStage(t *testing.T) {
 	}{
 		{func(p *profile.Profile) { p.Host, p.RootCert = "db.example", invalidCA }, "invalid CA", "validate CA certificate"},
 		{func(p *profile.Profile) { p.DBInstance = "example" }, "managed CA reaches RDS discovery", "discover database"},
+		{func(p *profile.Profile) { p.DBCluster = "example" }, "managed CA reaches cluster discovery", "DescribeDBClusters"},
 		{func(p *profile.Profile) { p.Host, p.RootCert = "db.example", ca }, "explicit host reaches SSM", "open tunnel"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -165,7 +166,7 @@ func TestProductionWarningBeforeConnection(t *testing.T) {
 		require.NoError(t, profile.Save(path, "test", &p))
 		var output bytes.Buffer
 		err := RunContext(t.Context(), []string{"connect", "--config", path, "test"}, io.Discard, &output)
-		require.ErrorContains(t, err, "load AWS configuration")
+		require.ErrorContains(t, err, `load AWS profile "missing-test-profile"; check it exists (aws configure list-profiles)`)
 		assert.Equal(t, environment == "production", strings.Contains(output.String(), "WARNING: PRODUCTION"))
 	}
 }

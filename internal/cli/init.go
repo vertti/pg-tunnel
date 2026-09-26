@@ -26,7 +26,7 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	flags.StringVar(&p.AWSProfile, "aws-profile", "", "AWS profile to use and save (defaults to current AWS credentials)")
 	flags.StringVar(&p.AWSProfile, "profile", "", "alias for --aws-profile")
 	path := flags.String("config", "", "destination JSON file (defaults to shared user configuration)")
-	if help, err := parseFlags(flags, args, stdout, stderr); help || err != nil {
+	if help, err := parseFlags(flags, args, stdout); help || err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
@@ -43,7 +43,7 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	// nonblocking and wait with select so cancellation never depends on Close.
 	terminal, err := unix.Open("/dev/tty", unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return fmt.Errorf("interactive setup needs a terminal: %w", err)
+		return fmt.Errorf("init is interactive and needs a terminal; without one, write pg-tunnel.json by hand: %w", err)
 	}
 	defer unix.Close(terminal) //nolint:errcheck // This input-only terminal has no buffered output.
 	cfgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -57,7 +57,7 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return execute(verifyCtx, candidate, func(context.Context, []string) error { return nil }, reporter(stderr))
 	}
 	if err = wizard.Run(ctx); err != nil {
-		return fmt.Errorf("initialize profile: %w", err)
+		return fmt.Errorf("initialize connection: %w", err)
 	}
 	return nil
 }

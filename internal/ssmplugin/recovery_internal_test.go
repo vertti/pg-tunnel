@@ -89,9 +89,8 @@ func TestResumeRejectsExpiredOrDeniedSessionsWithoutRetry(t *testing.T) {
 	}
 }
 
-func TestNewSessionRetainsAWSInputsAndRemovesTokenEnvironment(t *testing.T) {
-	t.Setenv(ResponseEnv, `{"SessionId":"session-test","TokenValue":"secret-token","StreamUrl":"wss://ssmmessages.example/channel"}`)
-	s, err := newSession([]string{"eu-central-1", "", "i-test", "https://ssm.example"})
+func TestNewSessionRetainsAWSInputs(t *testing.T) {
+	s, err := newSession([]string{"eu-central-1", "", "i-test", "https://ssm.example"}, []byte(`{"SessionId":"session-test","TokenValue":"secret-token","StreamUrl":"wss://ssmmessages.example/channel"}`+"\n"))
 	require.NoError(t, err)
 	assert.Equal(t, "session-test", s.SessionId)
 	assert.Equal(t, "secret-token", s.TokenValue)
@@ -100,16 +99,13 @@ func TestNewSessionRetainsAWSInputsAndRemovesTokenEnvironment(t *testing.T) {
 	assert.Equal(t, "https://ssm.example", s.Endpoint)
 	assert.Equal(t, "eu-central-1", sdkutil.GetRegion())
 	assert.Len(t, s.ClientId, 36)
-	assert.Empty(t, os.Getenv(ResponseEnv))
 }
 
 func TestInvalidSessionResponseIsRedacted(t *testing.T) {
 	for _, response := range []string{`secret-token`, `{"TokenValue":"secret-token"}`} {
-		t.Setenv(ResponseEnv, response)
-		err := Run([]string{"eu-central-1", "", "i-test", "https://ssm.example"}, nil)
+		_, err := newSession([]string{"eu-central-1", "", "i-test", "https://ssm.example"}, []byte(response))
 		require.Error(t, err)
 		assert.NotContains(t, err.Error(), "secret-token")
-		assert.Empty(t, os.Getenv(ResponseEnv))
 	}
 }
 
@@ -183,8 +179,7 @@ func TestAWSResumeRejectsTerminatedSessionWithoutStartingAnother(t *testing.T) {
 		assert.NoError(t, err)
 	}))
 	defer server.Close()
-	t.Setenv(ResponseEnv, `{"SessionId":"terminated-test-session","TokenValue":"token","StreamUrl":"wss://ssmmessages.example/channel"}`)
-	s, err := newSession([]string{"eu-central-1", "", "i-test", server.URL})
+	s, err := newSession([]string{"eu-central-1", "", "i-test", server.URL}, []byte(`{"SessionId":"terminated-test-session","TokenValue":"token","StreamUrl":"wss://ssmmessages.example/channel"}`))
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()

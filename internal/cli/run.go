@@ -35,14 +35,14 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 		flags.PrintDefaults()
 	}
 	var path string
-	flags.Func("config", "connection profiles (JSON); default: project pg-tunnel.json, then user configuration", func(value string) error {
+	flags.Func("config", "configuration file (JSON); default: project pg-tunnel.json, then user configuration", func(value string) error {
 		if value == "" {
 			return errors.New("--config requires a non-empty path")
 		}
 		path = value
 		return nil
 	})
-	if help, err := parseFlags(flags, args, stdout, stderr); help || err != nil {
+	if help, err := parseFlags(flags, args, stdout); help || err != nil {
 		return err
 	}
 	name, command, err := sessionArguments(mode, flags.Args())
@@ -56,7 +56,7 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 	}
 	p, err := profile.Load(path, name)
 	if err != nil {
-		return fmt.Errorf("load connection profile: %w", err)
+		return fmt.Errorf("load connection: %w", err)
 	}
 	if mode == "check" {
 		return checkConnection(ctx, &p, stderr)
@@ -122,14 +122,9 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	if err != nil {
 		return err
 	}
-	if p.RootCert == "" {
-		p.RootCert, err = awsdb.RDSCA(setupCtx, cfg.Region, report)
-		if err != nil {
-			return fmt.Errorf("prepare RDS certificates: %w", err)
-		}
-	}
-	if _, err = libpq.TLSConfig(session.Target{RootCert: p.RootCert}); err != nil {
-		return fmt.Errorf("validate CA certificate: %w", err)
+	err = prepareRootCert(setupCtx, p, cfg.Region, report)
+	if err != nil {
+		return err
 	}
 	jump, err := awsdb.JumpHost(setupCtx, ec2.NewFromConfig(cfg), p)
 	if err != nil {
@@ -143,8 +138,12 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	if err != nil {
 		return err
 	}
+	target, err := (&awsdb.Resolver{API: rds.NewFromConfig(cfg), Profile: p}).Resolve(setupCtx)
+	if err != nil {
+		return fmt.Errorf("discover database: %w", err)
+	}
 	runner := session.Runner{
-		Resolver:  &awsdb.Resolver{API: rds.NewFromConfig(cfg), Profile: p},
+		Target:    target,
 		Transport: &awsdb.SSM{API: ssm.NewFromConfig(cfg), Region: cfg.Region, Profile: p.AWSProfile, Target: jump, LocalPort: p.LocalPort, Report: report},
 		Auth:      authentication,
 		Clients:   libpq.Files{Root: root}, Verify: libpq.Verify, Env: os.Environ(), Report: report,
@@ -152,6 +151,19 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	}
 	if err = runner.Run(ctx); err != nil {
 		return fmt.Errorf("database session: %w", err)
+	}
+	return nil
+}
+
+func prepareRootCert(ctx context.Context, p *profile.Profile, region string, report func(string)) error {
+	if p.RootCert == "" {
+		var err error
+		if p.RootCert, err = awsdb.RDSCA(ctx, region, report); err != nil {
+			return fmt.Errorf("prepare RDS certificates: %w", err)
+		}
+	}
+	if _, err := libpq.TLSConfig(session.Target{RootCert: p.RootCert}); err != nil {
+		return fmt.Errorf("validate CA certificate: %w", err)
 	}
 	return nil
 }
@@ -188,7 +200,10 @@ func awsConfig(ctx context.Context, p *profile.Profile) (aws.Config, error) {
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, options...)
 	if err != nil {
-		return cfg, fmt.Errorf("load AWS configuration; check your profile or SSO login: %w", err)
+		if p.AWSProfile != "" {
+			return cfg, fmt.Errorf("load AWS profile %q; check it exists (aws configure list-profiles) and its login: %w", p.AWSProfile, err)
+		}
+		return cfg, fmt.Errorf("load AWS configuration; check your AWS profile or SSO login: %w", err)
 	}
 	if cfg.Region == "" {
 		return cfg, errors.New("AWS region is missing; set region in the AWS profile or connection, pass --region to init, or set AWS_REGION")
@@ -228,6 +243,20 @@ func sessionRoot() (string, error) {
 		return "", fmt.Errorf("find user cache directory: %w", err)
 	}
 	return filepath.Join(cache, "pg-tunnel", "sessions"), nil
+}
+
+func cleanupCommand(args []string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("cleanup", flag.ContinueOnError)
+	flags.Usage = func() {
+		fmt.Fprintln(flags.Output(), "Usage: pg-tunnel cleanup\n\nRemove credential files left behind by crashed sessions.") //nolint:errcheck // flag.Usage has no error return.
+	}
+	if help, err := parseFlags(flags, args, stdout); help || err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return usageError("cleanup takes no arguments")
+	}
+	return cleanup(stderr)
 }
 
 func cleanup(output io.Writer) error {

@@ -92,38 +92,56 @@ func (s *SSM) launch(ctx context.Context, path string, output *ssm.StartSessionO
 	if handle.sessionID == "" || handle.token == "" || aws.ToString(output.StreamUrl) == "" {
 		return errors.New("SSM returned incomplete session details")
 	}
-	args, env, err := s.pluginCommand(ctx, path, output)
+	response, err := json.Marshal(output)
+	if err != nil {
+		return fmt.Errorf("encode SSM response: %w", err)
+	}
+	args, err := s.pluginArgs(ctx, path)
 	if err != nil {
 		return err
 	}
-	// The child stops when this pipe closes, even if the supervisor is killed.
+	if err := startChild(ctx, args, response, handle); err != nil {
+		return err
+	}
+	return handle.waitReady(ctx)
+}
+
+// maxBufferedResponse stays well below pipe capacity (64 KiB on Linux and macOS),
+// so the response is written before the child starts without blocking.
+const maxBufferedResponse = 8 << 10
+
+// startChild sends the session response as the first stdin line; the child then
+// stops when that pipe closes, even if the supervisor is killed.
+func startChild(ctx context.Context, args []string, response []byte, handle *tunnel) error {
+	if len(response) >= maxBufferedResponse {
+		return fmt.Errorf("SSM session response is %d bytes; the limit is %d", len(response), maxBufferedResponse)
+	}
 	stdin, lifeline, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("create SSM child lifeline: %w", err)
 	}
 	handle.lifeline = lifeline
-	handle.process, err = process.Start(ctx, args, env, stdin, handle.logs, handle.logs)
+	// Writing while the read end is still open here means a child that exits
+	// early cannot turn its own failure into a broken-pipe error.
+	if _, err = lifeline.Write(append(response, '\n')); err != nil {
+		return errors.Join(fmt.Errorf("send SSM session to child: %w", err), stdin.Close())
+	}
+	handle.process, err = process.Start(ctx, args, os.Environ(), stdin, handle.logs, handle.logs)
 	if closeErr := stdin.Close(); err == nil && closeErr != nil {
 		err = closeErr
 	}
 	if err != nil {
 		return fmt.Errorf("launch embedded SSM child: %w", err)
 	}
-	return handle.waitReady(ctx)
+	return nil
 }
 
-func (s *SSM) pluginCommand(ctx context.Context, path string, output *ssm.StartSessionOutput) (args, env []string, result error) {
-	response, err := json.Marshal(output)
-	if err != nil {
-		return nil, nil, fmt.Errorf("encode SSM response: %w", err)
-	}
+func (s *SSM) pluginArgs(ctx context.Context, path string) ([]string, error) {
 	endpoint, err := ssm.NewDefaultEndpointResolverV2().ResolveEndpoint(ctx, ssm.EndpointParameters{Region: aws.String(s.Region)})
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve SSM endpoint: %w", err)
+		return nil, fmt.Errorf("resolve SSM endpoint: %w", err)
 	}
-	args = []string{path, ssmplugin.Command, s.Region, s.Profile, s.Target, endpoint.URI.String()}
-	env = append(os.Environ(), ssmplugin.ResponseEnv+"="+string(response))
-	return args, env, nil
+	return []string{path, ssmplugin.Command, s.Region, s.Profile, s.Target, endpoint.URI.String()}, nil
 }
 
 func availablePort(ctx context.Context, port int) (int, error) {

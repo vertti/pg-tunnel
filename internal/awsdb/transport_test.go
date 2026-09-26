@@ -101,7 +101,7 @@ func receiveSessionToken(w http.ResponseWriter, r *http.Request, cancel context.
 	return nil
 }
 
-func TestChildArgumentsKeepTokenInEnvironment(t *testing.T) {
+func TestChildReceivesTokenOnlyOnStdin(t *testing.T) {
 	t.Parallel()
 	// A tiny executable records the child contract and echoes the fake token to
 	// exercise output redaction. The actual AWS handshake is tested above.
@@ -111,7 +111,9 @@ func TestChildArgumentsKeepTokenInEnvironment(t *testing.T) {
 [ "$2" = 'eu-central-1' ] || exit 9
 [ "$4" = 'i-example' ] || exit 10
 case "$*" in *sensitive-token*) exit 11;; esac
-printf '%s' "$AWS_SSM_START_SESSION_RESPONSE"
+case "$(env)" in *sensitive-token*) exit 12;; esac
+IFS= read -r response
+printf '%s' "$response"
 exit 7
 `
 	require.NoError(t, os.WriteFile(executable, []byte(script), 0o700)) //nolint:gosec // Only the owner may execute the test fixture.
@@ -207,4 +209,19 @@ func receiveTermination(conn *websocket.Conn, logger ssmlog.T) error {
 			return nil
 		}
 	}
+}
+
+func TestOversizedSessionResponseIsRejectedBeforeLaunch(t *testing.T) {
+	t.Parallel()
+	api := &oversizedSSM{}
+	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: "/nonexistent/child"}
+	_, err := transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
+	require.ErrorContains(t, err, "SSM session response is")
+	assert.Equal(t, "session-example", api.terminated, "the remote session is still cleaned up")
+}
+
+type oversizedSSM struct{ fakeSSM }
+
+func (*oversizedSSM) StartSession(context.Context, *ssm.StartSessionInput, ...func(*ssm.Options)) (*ssm.StartSessionOutput, error) {
+	return &ssm.StartSessionOutput{SessionId: aws.String("session-example"), TokenValue: aws.String(strings.Repeat("t", 16<<10)), StreamUrl: aws.String("wss://example.invalid")}, nil
 }

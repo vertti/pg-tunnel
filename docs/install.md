@@ -12,7 +12,6 @@ The quickest install is `brew install vertti/tap/pg-tunnel` or
 | Linux, ARM64 | `pg-tunnel_linux_arm64.tar.xz` |
 | Linux, x86-64 | `pg-tunnel_linux_amd64.tar.xz` |
 
-Older releases use `.tar.gz`; use the filename from your release.
 
 Download your archive and `checksums.txt` from the same release. For example,
 on Apple Silicon, run in the download directory:
@@ -23,6 +22,9 @@ tar -xf pg-tunnel_darwin_arm64.tar.xz
 mkdir -p ~/.local/bin
 install -m 755 pg-tunnel ~/.local/bin/pg-tunnel
 ```
+
+Releases after v0.2.1 also carry build provenance:
+`gh attestation verify pg-tunnel_darwin_arm64.tar.xz --repo vertti/pg-tunnel`.
 
 Keep the extracted licenses/notices with your installation. Add `~/.local/bin`
 to your shell's `PATH`. With working AWS credentials, configure a connection:
