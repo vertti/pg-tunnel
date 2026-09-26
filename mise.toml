@@ -22,7 +22,7 @@ run = [
   "golangci-lint config verify",
   "golangci-lint run",
   "actionlint",
-  "shellcheck scripts/*.sh",
+  "shellcheck scripts/*.sh .github/scripts/*.sh",
   "zizmor --offline --persona pedantic .github",
   "goreleaser check",
   "go mod tidy -diff",
