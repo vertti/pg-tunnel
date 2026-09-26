@@ -24,6 +24,9 @@ mkdir -p ~/.local/bin
 install -m 755 pg-tunnel ~/.local/bin/pg-tunnel
 ```
 
+Releases after v0.2.1 also carry build provenance:
+`gh attestation verify pg-tunnel_darwin_arm64.tar.xz --repo vertti/pg-tunnel`.
+
 Keep the extracted licenses/notices with your installation. Add `~/.local/bin`
 to your shell's `PATH`. With working AWS credentials, configure a connection:
 
