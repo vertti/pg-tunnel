@@ -101,7 +101,7 @@ func receiveSessionToken(w http.ResponseWriter, r *http.Request, cancel context.
 	return nil
 }
 
-func TestChildArgumentsKeepTokenInEnvironment(t *testing.T) {
+func TestChildReceivesTokenOnlyOnStdin(t *testing.T) {
 	t.Parallel()
 	// A tiny executable records the child contract and echoes the fake token to
 	// exercise output redaction. The actual AWS handshake is tested above.
@@ -111,7 +111,9 @@ func TestChildArgumentsKeepTokenInEnvironment(t *testing.T) {
 [ "$2" = 'eu-central-1' ] || exit 9
 [ "$4" = 'i-example' ] || exit 10
 case "$*" in *sensitive-token*) exit 11;; esac
-printf '%s' "$AWS_SSM_START_SESSION_RESPONSE"
+case "$(env)" in *sensitive-token*) exit 12;; esac
+IFS= read -r response
+printf '%s' "$response"
 exit 7
 `
 	require.NoError(t, os.WriteFile(executable, []byte(script), 0o700)) //nolint:gosec // Only the owner may execute the test fixture.
