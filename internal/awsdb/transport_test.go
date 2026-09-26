@@ -210,3 +210,18 @@ func receiveTermination(conn *websocket.Conn, logger ssmlog.T) error {
 		}
 	}
 }
+
+func TestOversizedSessionResponseIsRejectedBeforeLaunch(t *testing.T) {
+	t.Parallel()
+	api := &oversizedSSM{}
+	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: "/nonexistent/child"}
+	_, err := transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
+	require.ErrorContains(t, err, "SSM session response is")
+	assert.Equal(t, "session-example", api.terminated, "the remote session is still cleaned up")
+}
+
+type oversizedSSM struct{ fakeSSM }
+
+func (*oversizedSSM) StartSession(context.Context, *ssm.StartSessionInput, ...func(*ssm.Options)) (*ssm.StartSessionOutput, error) {
+	return &ssm.StartSessionOutput{SessionId: aws.String("session-example"), TokenValue: aws.String(strings.Repeat("t", 16<<10)), StreamUrl: aws.String("wss://example.invalid")}, nil
+}
