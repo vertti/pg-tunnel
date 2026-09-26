@@ -32,8 +32,10 @@ jobs:
         with:
           version: "2026.9.1"
           cache: ${{ !inputs.release }} # Releases use freshly installed tools.
-      - if: ${{ !inputs.release }}
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+          cache_save: ${{ github.event_name == 'push' }} # Pull requests restore caches saved on main.
+      - id: package-cache
+        if: ${{ !inputs.release }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
@@ -56,6 +58,13 @@ jobs:
           fi
       - name: Verify Linux packing
         run: mise x -- upx -t dist/pg-tunnel_linux*/pg-tunnel
+      - if: github.event_name == 'push' && !inputs.release && steps.package-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ steps.package-cache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: packages
@@ -88,9 +97,11 @@ jobs:
         with:
           version: "2026.9.1"
           cache: ${{ !inputs.release }} # Releases use freshly installed tools.
+          cache_save: ${{ github.event_name == 'push' }}
           install_args: go
-      - if: ${{ !inputs.release }}
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - id: smoke-cache
+        if: ${{ !inputs.release }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
@@ -123,6 +134,14 @@ jobs:
         run: |
           PG_TUNNEL_TEST_EXECUTABLE="$PWD/pg-tunnel" mise x -- go test -count=1 -v \
             ./internal/awsdb -run '^TestEmbedded(StartupCancellationCleansUp|ShutdownSendsTerminationFlag)$'
+      - if: github.event_name == 'push' && !inputs.release && steps.smoke-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: ${{ steps.smoke-cache.outputs.cache-primary-key }}
 
   verify:
     name: Release packages
