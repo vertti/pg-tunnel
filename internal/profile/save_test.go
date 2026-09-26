@@ -94,3 +94,18 @@ func TestSaveRefusesToGrowPastSizeLimit(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, content, string(actual))
 }
+
+func TestSaveWritesOnlySetFieldsInReadingOrder(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	p := profile.Profile{DBInstance: "orders-db", Port: 5432, Database: "orders", User: "reader", Target: "i-0abc", Region: "eu-central-1"}
+	require.NoError(t, profile.Save(path, "orders", &p))
+	saved, err := os.ReadFile(path) //nolint:gosec // The path is inside t.TempDir.
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"profiles":{"orders":{"db_instance":"orders-db","port":5432,"database":"orders","user":"reader","target":"i-0abc","region":"eu-central-1"}}}`, string(saved))
+	text := string(saved)
+	keys := []string{`"db_instance"`, `"port"`, `"database"`, `"user"`, `"target"`, `"region"`}
+	for i := 1; i < len(keys); i++ {
+		assert.Less(t, strings.Index(text, keys[i-1]), strings.Index(text, keys[i]))
+	}
+}

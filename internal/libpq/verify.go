@@ -85,8 +85,8 @@ func isolatedConfig() (config *pgconn.Config, result error) {
 		return nil, fmt.Errorf("create isolated verification settings: %w", err)
 	}
 	defer func() { result = errors.Join(result, os.RemoveAll(dir)) }()
-	if writeErr := atomicWrite(dir, "service", "[pg-tunnel]\n"); writeErr != nil {
-		return nil, writeErr
+	if writeErr := os.WriteFile(filepath.Join(dir, "service"), []byte("[pg-tunnel]\n"), 0o600); writeErr != nil {
+		return nil, fmt.Errorf("write isolated verification settings: %w", writeErr)
 	}
 	// A dummy password suppresses .pgpass reads. TLS is configured after parsing,
 	// with certificate paths explicitly cleared to suppress ambient file reads.

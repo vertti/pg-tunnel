@@ -16,10 +16,6 @@ import (
 	"github.com/vertti/pg-tunnel/internal/session"
 )
 
-type resolverFunc func(context.Context) (session.Target, error)
-
-func (f resolverFunc) Resolve(ctx context.Context) (session.Target, error) { return f(ctx) }
-
 type authFunc func(context.Context, session.Target) (session.Credential, error)
 
 func (f authFunc) Credential(ctx context.Context, target session.Target) (session.Credential, error) {
@@ -63,7 +59,7 @@ func fixture() (session.Runner, *fakeTunnel, *fakeClient, *[]string) {
 	tunnel := &fakeTunnel{done: make(chan struct{}), onClose: func() { events = append(events, "tunnel closed") }}
 	client := &fakeClient{onClose: func() { events = append(events, "client closed") }, onUpdate: func(session.Credential) error { return nil }}
 	runner := session.Runner{
-		Resolver:  resolverFunc(func(context.Context) (session.Target, error) { return session.Target{Host: "db.example"}, nil }),
+		Target:    session.Target{Host: "db.example"},
 		Transport: transportFunc(func(context.Context, session.Target) (session.Tunnel, error) { return tunnel, nil }),
 		Auth: authFunc(func(context.Context, session.Target) (session.Credential, error) {
 			return session.Credential{Secret: "secret", ExpiresAt: time.Now().Add(15 * time.Minute)}, nil
@@ -87,14 +83,14 @@ func TestCommandReceivesClientEnvironment(t *testing.T) {
 
 func TestStartupFailuresCleanOwnedResources(t *testing.T) {
 	t.Parallel()
-	for _, stage := range []string{"resolve", "transport", "auth", "verify", "client", "command"} {
+	for _, stage := range []string{"transport", "auth", "verify", "client", "command"} {
 		t.Run(stage, func(t *testing.T) {
 			t.Parallel()
 			runner, _, _, events := fixture()
 			failure := errors.New("injected failure")
 			injectFailure(&runner, stage, failure)
 			require.ErrorIs(t, runner.Run(t.Context()), failure)
-			if stage == "resolve" || stage == "transport" {
+			if stage == "transport" {
 				assert.Empty(t, *events)
 				return
 			}
@@ -109,8 +105,6 @@ func TestStartupFailuresCleanOwnedResources(t *testing.T) {
 
 func injectFailure(r *session.Runner, stage string, failure error) {
 	switch stage {
-	case "resolve":
-		r.Resolver = resolverFunc(func(context.Context) (session.Target, error) { return session.Target{}, failure })
 	case "transport":
 		r.Transport = transportFunc(func(context.Context, session.Target) (session.Tunnel, error) { return nil, failure })
 	case "auth":

@@ -33,22 +33,22 @@ const (
 
 // Profile configures a database session without storing credentials.
 type Profile struct {
-	Environment     string `json:"environment,omitempty"`
-	Auth            string `json:"auth,omitempty"`
-	SecretID        string `json:"secret_id,omitempty"`
-	DBInstance      string `json:"db_instance"`
+	DBInstance      string `json:"db_instance,omitempty"`
 	DBCluster       string `json:"db_cluster,omitempty"`
 	ClusterEndpoint string `json:"cluster_endpoint,omitempty"`
-	Host            string `json:"host"`
+	Host            string `json:"host,omitempty"`
+	Port            int    `json:"port,omitempty"`
 	Database        string `json:"database"`
 	User            string `json:"user"`
-	Target          string `json:"target"`
-	JumpTag         string `json:"jump_tag"`
-	Region          string `json:"region"`
-	AWSProfile      string `json:"aws_profile"`
+	Auth            string `json:"auth,omitempty"`
+	SecretID        string `json:"secret_id,omitempty"`
+	Environment     string `json:"environment,omitempty"`
+	Target          string `json:"target,omitempty"`
+	JumpTag         string `json:"jump_tag,omitempty"`
+	Region          string `json:"region,omitempty"`
+	AWSProfile      string `json:"aws_profile,omitempty"`
+	LocalPort       int    `json:"local_port,omitempty"`
 	RootCert        string `json:"sslrootcert,omitempty"`
-	Port            int    `json:"port"`
-	LocalPort       int    `json:"local_port"`
 }
 
 // Load reads one named profile; certificate paths are relative to its file.
