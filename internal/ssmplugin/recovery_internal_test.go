@@ -155,36 +155,44 @@ func TestRecoveryChild(t *testing.T) {
 	t.Fatal("rejected resume did not exit")
 }
 
-func TestAWSResumeRejectsTerminatedSessionWithoutStartingAnother(t *testing.T) {
+func TestAWSResumeRejectsTerminalErrorsWithoutStartingAnother(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", "fixture-access")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "fixture-secret")
 	t.Setenv("AWS_SESSION_TOKEN", "")
 	t.Setenv("AWS_CONFIG_FILE", t.TempDir()+"/absent")
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", t.TempDir()+"/absent")
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		assert.Equal(t, "AmazonSSM.ResumeSession", r.Header.Get("X-Amz-Target"))
-		var input struct {
-			SessionID string `json:"SessionId"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&input); !assert.NoError(t, err) {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		assert.Equal(t, "terminated-test-session", input.SessionID)
-		w.Header().Set("Content-Type", "application/x-amz-json-1.1")
-		w.WriteHeader(http.StatusBadRequest)
-		_, err := w.Write([]byte(`{"__type":"DoesNotExistException","Message":"private upstream detail"}`))
-		assert.NoError(t, err)
-	}))
-	defer server.Close()
-	s, err := newSession([]string{"eu-central-1", "", "i-test", server.URL}, []byte(`{"SessionId":"terminated-test-session","TokenValue":"token","StreamUrl":"wss://ssmmessages.example/channel"}`))
-	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	err = resumeWithin(ctx, func() error { return s.ResumeSessionHandler(log.Logger(false, "test")) })
-	require.ErrorContains(t, err, "SSM resume rejected")
-	assert.NotContains(t, err.Error(), "private upstream detail")
-	assert.EqualValues(t, 1, requests.Load())
+	for code, reason := range map[string]string{
+		"DoesNotExistException": "the SSM session no longer exists",
+		"ExpiredTokenException": "AWS credentials expired",
+		"AccessDeniedException": "AWS denied ssm:ResumeSession",
+	} {
+		t.Run(code, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				assert.Equal(t, "AmazonSSM.ResumeSession", r.Header.Get("X-Amz-Target"))
+				var input struct {
+					SessionID string `json:"SessionId"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&input); !assert.NoError(t, err) {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				assert.Equal(t, "terminated-test-session", input.SessionID)
+				w.Header().Set("Content-Type", "application/x-amz-json-1.1")
+				w.WriteHeader(http.StatusBadRequest)
+				_, err := fmt.Fprintf(w, `{"__type":%q,"Message":"private upstream detail"}`, code)
+				assert.NoError(t, err)
+			}))
+			defer server.Close()
+			s, err := newSession([]string{"eu-central-1", "", "i-test", server.URL}, []byte(`{"SessionId":"terminated-test-session","TokenValue":"token","StreamUrl":"wss://ssmmessages.example/channel"}`))
+			require.NoError(t, err)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			err = resumeWithin(ctx, func() error { return s.ResumeSessionHandler(log.Logger(false, "test")) })
+			require.ErrorContains(t, err, "SSM resume rejected: "+reason)
+			assert.NotContains(t, err.Error(), "private upstream detail")
+			assert.EqualValues(t, 1, requests.Load())
+		})
+	}
 }

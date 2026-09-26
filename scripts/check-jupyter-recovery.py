@@ -11,6 +11,7 @@ import os
 import platform
 import secrets
 import select
+import signal
 import socket
 import socketserver
 import subprocess
@@ -178,6 +179,7 @@ Path(RECORD).write_text(json.dumps({'pid': os.getpid(), 'backend': backend, 'set
 """.replace("RECORD", repr(str(record)))
     client = None
     proc = None
+    suspended = []
     log = (root / "server.log").open("w")
     os.chmod(root / "server.log", 0o600)
     try:
@@ -222,15 +224,77 @@ Path(RECORD).write_text(json.dumps({'pid': os.getpid(), 'backend': backend, 'set
 
         before = query()
         print("Initial read-only TLS login passed.", flush=True)
-        time.sleep(
-            1
-        )  # Characterize a settled idle connection; active writes are a separate test.
+        if args.active_query:
+            reply = client.execute_interactive(
+                """
+import threading, time
+running = psycopg2.connect('', connect_timeout=5)
+running.set_session(readonly=True)
+active_backend = running.get_backend_pid()
+active_result = None
+def slow_query():
+    global active_result
+    try:
+        with running.cursor() as cursor:
+            cursor.execute("SET statement_timeout = '20s'")
+            cursor.execute("SELECT pg_sleep(60)")
+        active_result = 'completed'
+    except psycopg2.Error as error:
+        active_result = type(error).__name__
+    finally:
+        running.close()
+worker = threading.Thread(target=slow_query, daemon=True)
+worker.start()
+with closing(psycopg2.connect('', connect_timeout=5)) as observer:
+    observer.autocommit = True
+    with observer.cursor() as cursor:
+        for attempt in range(50):
+            cursor.execute("SELECT wait_event FROM pg_stat_activity WHERE pid = %s", (active_backend,))
+            state = cursor.fetchone()
+            if state and state[0] == 'PgSleep':
+                break
+            time.sleep(0.1)
+        else:
+            raise RuntimeError('test query did not start')
+""",
+                timeout=15,
+                output_hook=lambda message: None,
+            )
+            assert reply["content"]["status"] == "ok", "active-query setup failed"
+            print(
+                "Read-only pg_sleep query confirmed active on the database.", flush=True
+            )
+        time.sleep(1)  # Let the data channel settle before injecting a fault.
+        if args.suspend:
+            # Stop only this experiment's process tree; this is not OS sleep.
+            os.kill(proc.pid, signal.SIGSTOP)
+            suspended.append(proc.pid)
+            processes = [
+                tuple(map(int, row.split()))
+                for row in subprocess.check_output(
+                    ["ps", "-axo", "pid=,ppid="], text=True
+                ).splitlines()
+            ]
+            for parent in suspended:
+                for pid, ppid in processes:
+                    if ppid == parent:
+                        os.kill(pid, signal.SIGSTOP)
+                        suspended.append(pid)
         interrupted = time.monotonic()
         previous = proxy.interrupt(args.outage)
         print(
             f"Disconnected SSM; blocking new data-channel connections for {args.outage:g}s.",
             flush=True,
         )
+        if args.suspend:
+            print(
+                f"Test processes suspended for {args.suspend:g}s; Mac stays awake.",
+                flush=True,
+            )
+            time.sleep(args.suspend)
+            for pid in reversed(suspended):
+                os.kill(pid, signal.SIGCONT)
+            suspended.clear()
         if args.expect_stop:
             status = proc.wait(timeout=75)
             assert status != 0, "exhausted recovery must exit nonzero"
@@ -267,6 +331,15 @@ Path(RECORD).write_text(json.dumps({'pid': os.getpid(), 'backend': backend, 'set
             raise RuntimeError("no replacement SSM connection within 90 seconds")
         time.sleep(1)  # CONNECT acceptance precedes the encrypted WebSocket handshake.
         after = query()
+        if args.active_query:
+            reply = client.execute_interactive(
+                "worker.join(timeout=25)\n"
+                "assert not worker.is_alive(), 'interrupted query stayed blocked'\n"
+                "assert active_result in ('QueryCanceled', 'OperationalError'), active_result\n"
+                "print('Interrupted query outcome:', active_result)",
+                timeout=30,
+            )
+            assert reply["content"]["status"] == "ok", "active query did not finish"
         assert before["pid"] == after["pid"]
         assert before["backend"] != after["backend"]
         assert (
@@ -279,6 +352,11 @@ Path(RECORD).write_text(json.dumps({'pid': os.getpid(), 'backend': backend, 'set
             flush=True,
         )
     finally:
+        for pid in reversed(suspended):
+            try:
+                os.kill(pid, signal.SIGCONT)
+            except ProcessLookupError:
+                pass
         if client is not None:
             client.stop_channels()
         if proc is not None and proc.poll() is None:
@@ -327,6 +405,17 @@ if __name__ == "__main__":
         help="seconds to reject new SSM data connections (0..120)",
     )
     parser.add_argument(
+        "--suspend",
+        type=float,
+        default=0,
+        help="suspend only the test process tree for 0..120 seconds (not real laptop sleep)",
+    )
+    parser.add_argument(
+        "--active-query",
+        action="store_true",
+        help="interrupt a confirmed running read-only query before testing a fresh login",
+    )
+    parser.add_argument(
         "--expect-stop",
         action="store_true",
         help="require recovery-budget failure and kernel shutdown; use with --outage 75",
@@ -334,6 +423,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if not 0 <= args.outage <= 120:
         parser.error("--outage must be between 0 and 120 seconds")
+    if not 0 <= args.suspend <= 120:
+        parser.error("--suspend must be between 0 and 120 seconds")
+    if args.suspend and args.expect_stop:
+        parser.error("--suspend cannot be combined with --expect-stop")
     if args.expect_stop and args.outage < 75:
         parser.error("--expect-stop requires --outage of at least 75 seconds")
     root = Path(tempfile.mkdtemp(prefix="pg-tunnel-recovery-"))
