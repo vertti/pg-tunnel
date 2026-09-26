@@ -41,7 +41,9 @@ they exercise, including the copyable client examples.
 
 The opt-in [Jupyter interruption check](recovery.md#repeat-the-check) uses an
 existing read-only AWS connection. It is separate from CI and never changes
-system network settings.
+system network settings. The opt-in [container renewal check](containers.md#repeat-the-renewal-and-cleanup-check)
+verifies a fresh IAM login and local cleanup inside Docker; ShellCheck runs in CI,
+while the AWS check is manual.
 
 The core interfaces live in `internal/session`. AWS discovery/authentication and
 SSM transport live in `internal/awsdb`; `internal/libpq` owns credential files and
