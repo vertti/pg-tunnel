@@ -2,6 +2,8 @@ name: Packages
 
 on:
   pull_request:
+  push:
+    branches: [main] # Saves caches that pull requests can restore.
   workflow_call:
     inputs:
       release:
