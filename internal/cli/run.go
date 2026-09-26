@@ -35,7 +35,7 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 		flags.PrintDefaults()
 	}
 	var path string
-	flags.Func("config", "connection profiles (JSON); default: project pg-tunnel.json, then user configuration", func(value string) error {
+	flags.Func("config", "configuration file (JSON); default: project pg-tunnel.json, then user configuration", func(value string) error {
 		if value == "" {
 			return errors.New("--config requires a non-empty path")
 		}
@@ -56,7 +56,7 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 	}
 	p, err := profile.Load(path, name)
 	if err != nil {
-		return fmt.Errorf("load connection profile: %w", err)
+		return fmt.Errorf("load connection: %w", err)
 	}
 	report := reporter(stderr)
 	return execute(ctx, &p, sessionCommand(command, stdout, report), report)
@@ -173,7 +173,7 @@ func awsConfig(ctx context.Context, p *profile.Profile) (aws.Config, error) {
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, options...)
 	if err != nil {
-		return cfg, fmt.Errorf("load AWS configuration; check your profile or SSO login: %w", err)
+		return cfg, fmt.Errorf("load AWS configuration; check your AWS profile or SSO login: %w", err)
 	}
 	if cfg.Region == "" {
 		return cfg, errors.New("AWS region is missing; set region in the AWS profile or connection, pass --region to init, or set AWS_REGION")

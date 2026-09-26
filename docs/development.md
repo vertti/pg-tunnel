@@ -49,7 +49,8 @@ The core interfaces live in `internal/session`. AWS discovery/authentication and
 SSM transport live in `internal/awsdb`; `internal/libpq` owns credential files and
 the TLS/database readiness check; `internal/process` owns process groups. The small
 `internal/ssmplugin` adapter runs AWS code in an isolated copy of our executable.
-Profiles and CLI wiring remain separate from those providers.
+Connection configuration (`internal/profile`) and CLI wiring remain separate from
+those providers.
 
 `pg-tunnel --version` reports Go's embedded module version and, for builds from
 Git, the full commit. Tagged builds use the release version; other commits use
