@@ -53,7 +53,7 @@ func (r *Resolver) Resolve(ctx context.Context) (session.Target, error) {
 func (r *Resolver) resolveInstance(ctx context.Context, target session.Target) (session.Target, error) {
 	output, err := r.API.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{DBInstanceIdentifier: aws.String(r.Profile.DBInstance)})
 	if err != nil {
-		return target, fmt.Errorf("RDS DescribeDBInstances for %q (check region, profile, and rds:DescribeDBInstances permission): %w", r.Profile.DBInstance, err)
+		return target, fmt.Errorf("RDS DescribeDBInstances for %q (check region, AWS profile, and rds:DescribeDBInstances permission): %w", r.Profile.DBInstance, err)
 	}
 	if len(output.DBInstances) != 1 {
 		return target, fmt.Errorf("expected one RDS instance, found %d", len(output.DBInstances))
@@ -149,7 +149,7 @@ func credentialStatus(value *aws.Credentials, expiry time.Time) string {
 		return "AWS credentials expire " + expiry.Format(time.RFC3339)
 	}
 	if value.SessionToken != "" {
-		return "AWS temporary credential expiry is unknown; static environment credentials cannot be renewed. Use a refreshable profile or aws-vault exec --server."
+		return "AWS temporary credential expiry is unknown; static environment credentials cannot be renewed. Use a refreshable AWS profile or aws-vault exec --server."
 	}
 	return "AWS credential expiry is not reported by the provider."
 }
@@ -157,7 +157,7 @@ func credentialStatus(value *aws.Credentials, expiry time.Time) string {
 func (r *Resolver) resolveCluster(ctx context.Context, target session.Target) (session.Target, error) {
 	output, err := r.API.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(r.Profile.DBCluster)})
 	if err != nil {
-		return target, fmt.Errorf("RDS DescribeDBClusters for %q (check region, profile, and rds:DescribeDBClusters permission): %w", r.Profile.DBCluster, err)
+		return target, fmt.Errorf("RDS DescribeDBClusters for %q (check region, AWS profile, and rds:DescribeDBClusters permission): %w", r.Profile.DBCluster, err)
 	}
 	if len(output.DBClusters) != 1 {
 		return target, fmt.Errorf("expected one Aurora cluster, found %d", len(output.DBClusters))

@@ -108,6 +108,7 @@ func TestMissingAWSLoginNamesTheFix(t *testing.T) {
 	for _, p := range []profile.Profile{{Region: "eu-west-1"}, {AWSProfile: "keys"}} {
 		_, err = awsConfig(t.Context(), &p)
 		require.ErrorContains(t, err, "no usable AWS credentials; make AWS credentials available")
+		require.ErrorContains(t, err, "AWS_PROFILE or the connection's aws_profile")
 		require.NotContains(t, err.Error(), "aws sso login", "only SSO profiles are told to use aws sso login")
 	}
 }
@@ -147,7 +148,7 @@ func TestSessionStopsAtFirstFailedStage(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			require.NoError(t, profile.Save(path, "test", &p))
 			var output bytes.Buffer
-			err := RunContext(t.Context(), []string{"connect", "--config", path, "test"}, &output)
+			err := RunContext(t.Context(), []string{"connect", "--config", path, "test"}, io.Discard, &output)
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
@@ -160,7 +161,7 @@ func TestProductionWarningBeforeConnection(t *testing.T) {
 		p := profile.Profile{Environment: environment, DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432, AWSProfile: "missing-test-profile"}
 		require.NoError(t, profile.Save(path, "test", &p))
 		var output bytes.Buffer
-		err := RunContext(t.Context(), []string{"connect", "--config", path, "test"}, &output)
+		err := RunContext(t.Context(), []string{"connect", "--config", path, "test"}, io.Discard, &output)
 		require.ErrorContains(t, err, "load AWS configuration")
 		assert.Equal(t, environment == "production", strings.Contains(output.String(), "WARNING: PRODUCTION"))
 	}
@@ -173,9 +174,9 @@ func TestCleanupRemovesAbandonedSessions(t *testing.T) {
 	abandoned := filepath.Join(root, "session-abandoned")
 	require.NoError(t, os.MkdirAll(abandoned, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(abandoned, "pgpass"), []byte("secret"), 0o600))
-	require.ErrorIs(t, RunContext(t.Context(), []string{"cleanup", "extra"}, io.Discard), ErrUsage)
+	require.ErrorIs(t, RunContext(t.Context(), []string{"cleanup", "extra"}, io.Discard, io.Discard), ErrUsage)
 	var summary bytes.Buffer
-	require.NoError(t, RunContext(t.Context(), []string{"cleanup"}, &summary))
+	require.NoError(t, RunContext(t.Context(), []string{"cleanup"}, io.Discard, &summary))
 	assert.Equal(t, "Removed 1 abandoned session(s).\n", summary.String())
 	_, err = os.Stat(abandoned)
 	require.ErrorIs(t, err, os.ErrNotExist)

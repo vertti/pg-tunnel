@@ -29,7 +29,7 @@ const ResponseEnv = "AWS_SSM_START_SESSION_RESPONSE"
 
 // Run invokes the pinned upstream session with bounded recovery. It may exit the calling process.
 func Run(args []string, output io.Writer) error {
-	if len(args) != 6 || args[0] != ResponseEnv || args[2] != "StartSession" {
+	if len(args) != 4 {
 		return errors.New("invalid internal SSM invocation")
 	}
 	s, err := newSession(args)
@@ -55,6 +55,7 @@ func StopWhenSupervisorExits(stdin io.Reader) {
 }
 
 // Keep token handling private while using AWS's session, handshake and forwarding code.
+// args are region, AWS profile, target, and SSM endpoint.
 func newSession(args []string) (*session.Session, error) {
 	response := os.Getenv(ResponseEnv)
 	if err := os.Unsetenv(ResponseEnv); err != nil {
@@ -64,15 +65,11 @@ func newSession(args []string) (*session.Session, error) {
 	if json.Unmarshal([]byte(response), &start) != nil {
 		return nil, errors.New("invalid internal SSM response")
 	}
-	var request ssm.StartSessionInput
-	if json.Unmarshal([]byte(args[4]), &request) != nil {
-		return nil, errors.New("invalid internal SSM request")
-	}
-	s := &session.Session{SessionId: aws.ToString(start.SessionId), StreamUrl: aws.ToString(start.StreamUrl), TokenValue: aws.ToString(start.TokenValue), TargetId: aws.ToString(request.Target), Region: args[1], Endpoint: args[5]}
+	s := &session.Session{SessionId: aws.ToString(start.SessionId), StreamUrl: aws.ToString(start.StreamUrl), TokenValue: aws.ToString(start.TokenValue), TargetId: args[2], Region: args[0], Endpoint: args[3]}
 	if s.SessionId == "" || s.StreamUrl == "" || s.TokenValue == "" || s.TargetId == "" {
 		return nil, errors.New("incomplete internal SSM session")
 	}
-	sdkutil.SetRegionAndProfile(args[1], args[3])
+	sdkutil.SetRegionAndProfile(args[0], args[1])
 	uuid.SwitchFormat(uuid.CleanHyphen)
 	s.ClientId = uuid.NewV4().String()
 	return s, nil

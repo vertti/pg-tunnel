@@ -28,26 +28,22 @@ import (
 	"github.com/vertti/pg-tunnel/internal/setup"
 )
 
-func runSession(ctx context.Context, mode string, args []string, output io.Writer) error {
+func runSession(ctx context.Context, mode string, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet(mode, flag.ContinueOnError)
-	flags.SetOutput(output)
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: pg-tunnel "+sessionSyntax[mode]) //nolint:errcheck // flag.Usage has no error return.
+		fmt.Fprintln(flags.Output(), "Usage: pg-tunnel "+sessionSyntax[mode]) //nolint:errcheck // flag.Usage has no error return.
 		flags.PrintDefaults()
 	}
 	var path string
-	flags.Func("config", "connection profiles (JSON); default: project pg-tunnel.json, then user configuration", func(value string) error {
+	flags.Func("config", "configuration file (JSON); default: project pg-tunnel.json, then user configuration", func(value string) error {
 		if value == "" {
 			return errors.New("--config requires a non-empty path")
 		}
 		path = value
 		return nil
 	})
-	if err := flags.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return fmt.Errorf("%w: %w", ErrUsage, err)
+	if help, err := parseFlags(flags, args, stdout, stderr); help || err != nil {
+		return err
 	}
 	name, command, err := sessionArguments(mode, flags.Args())
 	if err != nil {
@@ -60,10 +56,10 @@ func runSession(ctx context.Context, mode string, args []string, output io.Write
 	}
 	p, err := profile.Load(path, name)
 	if err != nil {
-		return fmt.Errorf("load connection profile: %w", err)
+		return fmt.Errorf("load connection: %w", err)
 	}
-	report := reporter(output)
-	return execute(ctx, &p, sessionCommand(command, os.Stdout, report), report)
+	report := reporter(stderr)
+	return execute(ctx, &p, sessionCommand(command, stdout, report), report)
 }
 
 func reporter(output io.Writer) func(string) {
@@ -177,7 +173,7 @@ func awsConfig(ctx context.Context, p *profile.Profile) (aws.Config, error) {
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, options...)
 	if err != nil {
-		return cfg, fmt.Errorf("load AWS configuration; check your profile or SSO login: %w", err)
+		return cfg, fmt.Errorf("load AWS configuration; check your AWS profile or SSO login: %w", err)
 	}
 	if cfg.Region == "" {
 		return cfg, errors.New("AWS region is missing; set region in the AWS profile or connection, pass --region to init, or set AWS_REGION")
@@ -196,7 +192,7 @@ func loginHint(cfg *aws.Config) string {
 			return "AWS profile " + shared.Profile + " uses IAM Identity Center; log in with aws sso login --profile " + shared.Profile
 		}
 	}
-	return "make AWS credentials available the way the AWS CLI finds them (environment, a named profile, or aws-vault) and select a profile with --aws-profile or aws_profile if needed"
+	return "make AWS credentials available the way the AWS CLI finds them (environment, a named profile, or aws-vault) and select a profile with AWS_PROFILE or the connection's aws_profile if needed"
 }
 
 func environmentExpiry() (time.Time, error) {

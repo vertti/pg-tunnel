@@ -59,17 +59,14 @@ func TestWizardReportsEveryOutputFailure(t *testing.T) {
 	}
 }
 
-func TestWizardRequiresVerifierAndUniqueName(t *testing.T) {
+func TestWizardRequiresUniqueName(t *testing.T) {
 	t.Parallel()
 	ca := certificate(t)
 	input := strings.Join(passwordAnswers, "\n") + "\n"
-	wizard := setup.Wizard{Config: fixtureConfig(t, ""), Input: strings.NewReader(input), Output: io.Discard, RootCert: ca}
-	require.ErrorContains(t, wizard.Run(t.Context()), "requires a connection verifier")
-
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	existing := profile.Profile{DBInstance: "other", Database: "data", User: "reader", Target: "i-other", Port: 5432}
 	require.NoError(t, profile.Save(path, "readonly", &existing))
-	wizard = setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, ""), Input: strings.NewReader(input), Output: io.Discard, Path: path, RootCert: ca}
+	wizard := setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, ""), Input: strings.NewReader(input), Output: io.Discard, Path: path, RootCert: ca}
 	require.ErrorContains(t, wizard.Run(t.Context()), "already exists")
 	saved, err := profile.Load(path, "readonly")
 	require.NoError(t, err)

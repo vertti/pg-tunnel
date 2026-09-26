@@ -108,8 +108,8 @@ func TestChildArgumentsKeepTokenInEnvironment(t *testing.T) {
 	executable := t.TempDir() + "/child"
 	script := `#!/bin/sh
 [ "$1" = '__ssm' ] || exit 8
-[ "$2" = 'AWS_SSM_START_SESSION_RESPONSE' ] || exit 9
-[ "$4" = 'StartSession' ] || exit 10
+[ "$2" = 'eu-central-1' ] || exit 9
+[ "$4" = 'i-example' ] || exit 10
 case "$*" in *sensitive-token*) exit 11;; esac
 printf '%s' "$AWS_SSM_START_SESSION_RESPONSE"
 exit 7

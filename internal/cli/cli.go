@@ -36,44 +36,59 @@ func usageError(format string, args ...any) error {
 	return fmt.Errorf("%w: %s (see pg-tunnel --help)", ErrUsage, fmt.Sprintf(format, args...))
 }
 
-// RunContext executes commands until completion or cancellation.
-func RunContext(ctx context.Context, args []string, output io.Writer) error {
+// RunContext executes commands until completion or cancellation. Requested help,
+// the version, and connect's client settings go to stdout; everything else to stderr.
+func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usageError("missing command")
 	}
 	switch args[0] {
 	case "run", "connect":
-		return runSession(ctx, args[0], args[1:], output)
+		return runSession(ctx, args[0], args[1:], stdout, stderr)
 	case "init":
-		return initProfile(ctx, args[1:], output)
+		return initProfile(ctx, args[1:], stdout, stderr)
 	case "cleanup":
 		if len(args) != 1 {
 			return usageError("cleanup takes no arguments")
 		}
-		return cleanup(output)
+		return cleanup(stderr)
 	case "help":
-		return rootOptions([]string{"--help"}, output)
+		return rootOptions([]string{"--help"}, stdout, stderr)
 	}
 	if args[0] == "" || args[0][0] != '-' {
 		return usageError("unknown command %q", args[0])
 	}
-	return rootOptions(args, output)
+	return rootOptions(args, stdout, stderr)
 }
 
-func rootOptions(args []string, output io.Writer) error {
+// parseFlags prints usage to stdout when help is requested and to stderr after a flag error.
+func parseFlags(flags *flag.FlagSet, args []string, stdout, stderr io.Writer) (help bool, _ error) {
+	usage := flags.Usage
+	flags.Usage = func() {}
+	flags.SetOutput(stderr)
+	err := flags.Parse(args)
+	if errors.Is(err, flag.ErrHelp) {
+		flags.SetOutput(stdout)
+		usage()
+		return true, nil
+	}
+	if err != nil {
+		usage()
+		return false, fmt.Errorf("%w: %w", ErrUsage, err)
+	}
+	return false, nil
+}
+
+func rootOptions(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("pg-tunnel", flag.ContinueOnError)
-	flags.SetOutput(output)
 	flags.Usage = func() {
-		fmt.Fprint(output, help) //nolint:errcheck // flag.Usage has no error return; normal command output errors are returned separately.
+		fmt.Fprint(flags.Output(), help) //nolint:errcheck // flag.Usage has no error return; normal command output errors are returned separately.
 		flags.PrintDefaults()
 	}
 	version := flags.Bool("version", false, "print version and build commit")
 
-	if err := flags.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return fmt.Errorf("%w: %w", ErrUsage, err)
+	if help, err := parseFlags(flags, args, stdout, stderr); help || err != nil {
+		return err
 	}
 	if flags.NArg() > 0 {
 		return usageError("unexpected argument %q", flags.Arg(0))
@@ -83,7 +98,7 @@ func rootOptions(args []string, output io.Writer) error {
 	}
 
 	info, _ := debug.ReadBuildInfo()
-	if _, err := fmt.Fprintln(output, buildVersion(info)); err != nil {
+	if _, err := fmt.Fprintln(stdout, buildVersion(info)); err != nil {
 		return fmt.Errorf("write version: %w", err)
 	}
 

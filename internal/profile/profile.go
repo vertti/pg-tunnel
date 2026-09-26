@@ -62,9 +62,9 @@ func Load(path, name string) (Profile, error) {
 	if err != nil {
 		return Profile{}, err
 	}
-	// A cloned repository could otherwise pair a host and CA it controls with the user's credentials.
-	if project && value.Host != "" {
-		return Profile{}, fmt.Errorf("profile %q in %s sets an explicit host, which a pg-tunnel.json found in the current directory may not do; trust this file with --config %s", name, path, path)
+	// A cloned repository could otherwise trust a CA it controls with the user's credentials.
+	if project && (value.Host != "" || value.RootCert != "") {
+		return Profile{}, fmt.Errorf("connection %q in %s sets host or sslrootcert, which a pg-tunnel.json found in the current directory may not do; trust this file with --config %s", name, path, path)
 	}
 	return value, nil
 }
@@ -83,7 +83,7 @@ func configPath(path string) (_ string, project bool, _ error) {
 		return "", false, fmt.Errorf("no project %s; find user configuration directory (or use --config PATH): %w", filename, err)
 	}
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return "", false, fmt.Errorf("no configuration file found: checked %s in the current directory and %s; create one or use --config PATH", filename, path)
+		return "", false, fmt.Errorf("no configuration file found: checked %s in the current directory and %s; create one with pg-tunnel init or use --config PATH", filename, path)
 	}
 	return path, false, nil
 }
@@ -95,7 +95,7 @@ type configuration struct {
 func readConfig(path string) (configuration, error) {
 	file, err := os.Open(path) //nolint:gosec // The path is an explicit configuration file or a documented default location.
 	if err != nil {
-		return configuration{}, fmt.Errorf("open profiles %s: %w", path, err)
+		return configuration{}, fmt.Errorf("open configuration %s: %w", path, err)
 	}
 	defer file.Close() //nolint:errcheck // This file is read-only.
 	var config configuration
@@ -110,7 +110,7 @@ func readConfig(path string) (configuration, error) {
 		return configuration{}, errors.New("configuration exceeds the 1 MiB size limit")
 	}
 	if err != nil {
-		return configuration{}, fmt.Errorf("decode profiles %s: %w", path, err)
+		return configuration{}, fmt.Errorf("decode configuration %s: %w", path, err)
 	}
 	return config, nil
 }
@@ -122,13 +122,13 @@ func load(path, name string) (Profile, error) {
 	}
 	value, ok := config.Profiles[name]
 	if !ok {
-		return Profile{}, fmt.Errorf("profile %q does not exist in %s; %s", name, path, available(config.Profiles))
+		return Profile{}, fmt.Errorf("connection %q does not exist in %s; %s", name, path, available(config.Profiles))
 	}
 	if value.Port == 0 {
 		value.Port = 5432
 	}
 	if err = value.Validate(); err != nil {
-		return Profile{}, fmt.Errorf("profile %q in %s: %w", name, path, err)
+		return Profile{}, fmt.Errorf("connection %q in %s: %w", name, path, err)
 	}
 	if value.RootCert == "" {
 		return value, nil
@@ -172,12 +172,12 @@ func (p *Profile) Validate() error {
 
 func (p *Profile) validateText() error {
 	if p.Host != "" && p.RootCert == "" {
-		return errors.New("sslrootcert is required for an explicit host; RDS instance and cluster profiles can use automatic certificates")
+		return errors.New("sslrootcert is required for an explicit host; RDS instance and cluster connections can use automatic certificates")
 	}
 
 	for _, value := range []string{p.DBInstance, p.DBCluster, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert, p.SecretID} {
 		if !plainText(value) {
-			return errors.New("profile values must be UTF-8 without control characters or surrounding whitespace")
+			return errors.New("connection values must be UTF-8 without control characters or surrounding whitespace")
 		}
 	}
 	if strings.ContainsAny(p.Host, "/:, \\*") || strings.ContainsAny(p.Database, "*") || strings.ContainsAny(p.User, "*") {
