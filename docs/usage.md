@@ -39,7 +39,9 @@ config. Existing connection names are not overwritten.
 | Setting | Meaning |
 | --- | --- |
 | `db_instance` | Discover an RDS PostgreSQL instance's endpoint and port. |
-| `host` | Explicit database endpoint; mutually exclusive with `db_instance`. |
+| `db_cluster` | Discover an Aurora PostgreSQL cluster endpoint and port. |
+| `cluster_endpoint` | `writer` (default) or `reader`; requires `db_cluster`. |
+| `host` | Explicit endpoint. Set exactly one of `db_instance`, `db_cluster`, or `host`. |
 | `port` | Remote port for an explicit host; default `5432`. |
 | `database`, `user` | Existing PostgreSQL database and user. |
 | `environment` | `development`, `staging`, or `production`; production prints a warning. |
@@ -51,10 +53,35 @@ config. Existing connection names are not overwritten.
 | `local_port` | Local port; default `0` selects an available port. |
 | `sslrootcert` | Custom CA PEM file; required for an explicit `host`. |
 
-For RDS instances, pg-tunnel downloads and caches the official
+For RDS instances and Aurora clusters, pg-tunnel downloads and caches the official
 [AWS RDS CA bundle](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html)
 automatically and checks for updates after 30 days. TLS always uses `verify-full`.
 Set `sslrootcert` to manage certificates yourself; custom files are not updated.
+
+## Aurora cluster endpoints
+
+`init` lists individual instances. To use a cluster endpoint, edit your connection:
+
+```json
+{
+  "profiles": {
+    "analytics": {
+      "db_cluster": "my-cluster",
+      "cluster_endpoint": "reader",
+      "database": "app",
+      "user": "app_reader",
+      "target": "i-your-ssm-host",
+      "region": "eu-central-1"
+    }
+  }
+}
+```
+
+Omit `cluster_endpoint` or use `writer` for the primary. The endpoint is discovered
+again for each new session. A reader endpoint can route to the primary when no
+replicas exist, so use database permissions to enforce read-only access.
+For Secrets Manager authentication, any `host` in the secret must match the chosen
+endpoint; a writer-host secret cannot be used for a reader connection.
 
 ## AWS access
 
@@ -67,12 +94,13 @@ The SSM host must reach the database and support
 | Confirm an already-ended session after a termination error | `ssm:DescribeSessions` |
 | Recover an interrupted tunnel | `ssm:ResumeSession` |
 | Find an RDS instance | `rds:DescribeDBInstances` |
+| Find an Aurora cluster | `rds:DescribeDBClusters` |
 | Find a host by `jump_tag` | `ec2:DescribeInstances` |
 | Discover hosts in `init` | `ec2:DescribeInstances`, `ssm:DescribeInstanceInformation` |
 | IAM database login | `rds-db:connect` |
 | Secrets Manager login | `secretsmanager:GetSecretValue`, plus `kms:Decrypt` for a customer-managed KMS key |
 
-IAM authentication also requires IAM enabled on the database instance and
+IAM authentication also requires IAM enabled on the instance or cluster and
 `rds_iam` granted to the database user. PostgreSQL roles determine SQL access;
 pg-tunnel does not grant permissions.
 
