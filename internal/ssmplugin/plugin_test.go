@@ -20,8 +20,8 @@ func TestRejectsUnsupportedChildInvocations(t *testing.T) {
 	for _, args := range [][]string{
 		nil,
 		{"--version"},
-		{"inline-secret", "region", "StartSession", "", "{}", "endpoint"},
-		{ssmplugin.ResponseEnv, "region", "OtherOperation", "", "{}", "endpoint"},
+		{"region", "", "i-test"},
+		{ssmplugin.ResponseEnv, "region", "StartSession", "", "{}", "endpoint"},
 	} {
 		require.ErrorContains(t, ssmplugin.Run(args, io.Discard), "invalid internal SSM invocation")
 	}
