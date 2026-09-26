@@ -4,12 +4,17 @@ set -eu
 
 tag=$1
 checksums=$2
+# Both values are interpolated into Ruby source.
+if ! printf '%s\n' "$tag" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?'; then
+  echo "unexpected release tag: $tag" >&2
+  exit 1
+fi
 url="https://github.com/vertti/pg-tunnel/releases/download/$tag"
 
 sha() {
   value=$(awk -v archive="pg-tunnel_$1.tar.xz" '$2 == archive { print $1 }' "$checksums")
-  if [ -z "$value" ]; then
-    echo "$checksums has no entry for pg-tunnel_$1.tar.xz" >&2
+  if ! printf '%s\n' "$value" | grep -Eqx '[0-9a-f]{64}'; then
+    echo "$checksums has no valid SHA-256 for pg-tunnel_$1.tar.xz" >&2
     exit 1
   fi
   echo "$value"
