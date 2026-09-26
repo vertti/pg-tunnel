@@ -69,6 +69,7 @@ type Command func(context.Context, []string) error
 
 // Runner composes providers while retaining sole ownership of cleanup.
 type Runner struct {
+	Target    Target
 	Transport Transport
 	Auth      Auth
 	Clients   Clients
@@ -76,7 +77,6 @@ type Runner struct {
 	Command   Command
 	Report    func(string)
 	Env       []string
-	Target    Target
 }
 
 // Run starts a database session, runs its command, and closes every resource.
