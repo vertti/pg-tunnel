@@ -20,7 +20,7 @@ func (e usageErr) Error() string { return string(e) }
 // Is makes errors.Is match ErrUsage without printing its text.
 func (usageErr) Is(target error) bool { return target == ErrUsage }
 
-const help = `pg-tunnel connects PostgreSQL clients to private AWS RDS databases through SSM.
+const help = `pg-tunnel connects PostgreSQL clients to private AWS RDS and Aurora databases through SSM.
 
 Usage:
   pg-tunnel run [--config PATH] CONNECTION -- COMMAND [ARGS...]
