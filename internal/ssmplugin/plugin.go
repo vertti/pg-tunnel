@@ -46,7 +46,7 @@ func Run(args []string, output io.Writer) error {
 	sessionutil.ControlSignals = append(sessionutil.ControlSignals, syscall.SIGTERM)
 	go StopWhenSupervisorExits(stdin)
 	logger := quietLogger{seelog.Disabled}
-	s.DataChannel = &recoveryChannel{DataChannel: &datachannel.DataChannel{}, resume: func() error { return s.ResumeSessionHandler(logger) }, output: output}
+	s.DataChannel = &recoveryChannel{DataChannel: &datachannel.DataChannel{}, resume: func() error { return resumeSession(s, logger) }, output: output}
 	if err := s.Execute(logger); err != nil {
 		return fmt.Errorf("start embedded SSM session: %w", err)
 	}

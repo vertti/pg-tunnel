@@ -16,6 +16,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/session-manager-plugin/src/communicator"
 	"github.com/aws/session-manager-plugin/src/datachannel"
 	"github.com/aws/session-manager-plugin/src/log"
@@ -161,12 +162,22 @@ func TestAWSResumeRejectsTerminalErrorsWithoutStartingAnother(t *testing.T) {
 	t.Setenv("AWS_SESSION_TOKEN", "")
 	t.Setenv("AWS_CONFIG_FILE", t.TempDir()+"/absent")
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", t.TempDir()+"/absent")
-	for code, reason := range map[string]string{
-		"DoesNotExistException": "the SSM session no longer exists",
-		"ExpiredTokenException": "AWS credentials expired",
-		"AccessDeniedException": "AWS denied ssm:ResumeSession",
+	for _, tc := range []struct {
+		name, code, body, source, expiry, reason string
+		status, requests                         int
+	}{
+		{name: "missing session", code: "DoesNotExistException", reason: "the SSM session no longer exists", status: 400, requests: 1},
+		{name: "expired token", code: "ExpiredTokenException", reason: "AWS credentials expired", status: 400, requests: 1},
+		{name: "access denied", code: "AccessDeniedException", reason: "AWS denied ssm:ResumeSession", status: 400, requests: 1},
+		{name: "plain forbidden", body: "Server authentication failed: <UnauthorizedRequest><message>Forbidden.</message></UnauthorizedRequest>\n", reason: "AWS rejected SSM authentication or access (HTTP 403)", status: 403, requests: 1},
+		{name: "plain unauthorized", body: "private upstream detail", reason: "AWS rejected SSM authentication or access (HTTP 401)", status: 401, requests: 1},
+		{name: "known expired environment", source: config.CredentialsSourceName, expiry: time.Now().Add(-time.Minute).Format(time.RFC3339), reason: "AWS credentials expired", requests: 0},
+		{name: "valid environment expiry", source: config.CredentialsSourceName, expiry: time.Now().Add(time.Hour).Format(time.RFC3339), code: "DoesNotExistException", reason: "the SSM session no longer exists", status: 400, requests: 1},
+		{name: "refreshable provider ignores environment expiry", source: "CredentialsEndpointProvider", expiry: time.Now().Add(-time.Minute).Format(time.RFC3339), code: "DoesNotExistException", reason: "the SSM session no longer exists", status: 400, requests: 1},
+		{name: "plain server failure remains retryable", body: "private upstream detail", reason: "SSM recovery exceeded 1m", status: 503, requests: -1},
 	} {
-		t.Run(code, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AWS_CREDENTIAL_EXPIRATION", tc.expiry)
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
@@ -179,20 +190,33 @@ func TestAWSResumeRejectsTerminalErrorsWithoutStartingAnother(t *testing.T) {
 					return
 				}
 				assert.Equal(t, "terminated-test-session", input.SessionID)
+				if tc.body != "" {
+					w.Header().Set("Content-Type", "application/octet-stream")
+					w.WriteHeader(tc.status)
+					_, err := fmt.Fprint(w, tc.body)
+					assert.NoError(t, err)
+					return
+				}
 				w.Header().Set("Content-Type", "application/x-amz-json-1.1")
-				w.WriteHeader(http.StatusBadRequest)
-				_, err := fmt.Fprintf(w, `{"__type":%q,"Message":"private upstream detail"}`, code)
+				w.WriteHeader(tc.status)
+				_, err := fmt.Fprintf(w, `{"__type":%q,"Message":"private upstream detail"}`, tc.code)
 				assert.NoError(t, err)
 			}))
 			defer server.Close()
 			s, err := newSession([]string{"eu-central-1", "", "i-test", server.URL}, []byte(`{"SessionId":"terminated-test-session","TokenValue":"token","StreamUrl":"wss://ssmmessages.example/channel"}`))
 			require.NoError(t, err)
+			s.Credentials.Source = tc.source
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
-			err = resumeWithin(ctx, func() error { return s.ResumeSessionHandler(log.Logger(false, "test")) })
-			require.ErrorContains(t, err, "SSM resume rejected: "+reason)
+			err = resumeWithin(ctx, func() error { return resumeSession(s, log.Logger(false, "test")) })
+			require.ErrorContains(t, err, tc.reason)
 			assert.NotContains(t, err.Error(), "private upstream detail")
-			assert.EqualValues(t, 1, requests.Load())
+			assert.NotContains(t, err.Error(), "<UnauthorizedRequest>")
+			if tc.requests < 0 {
+				assert.Positive(t, requests.Load())
+			} else {
+				assert.EqualValues(t, tc.requests, requests.Load())
+			}
 		})
 	}
 }
