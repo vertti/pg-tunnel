@@ -44,7 +44,7 @@ func Run(args []string, output io.Writer) error {
 	}
 	// The supervisor sends SIGTERM; upstream otherwise bypasses its graceful handler.
 	sessionutil.ControlSignals = append(sessionutil.ControlSignals, syscall.SIGTERM)
-	go StopWhenSupervisorExits(stdin)
+	go stopWhenSupervisorExits(stdin)
 	logger := quietLogger{seelog.Disabled}
 	s.DataChannel = &recoveryChannel{DataChannel: &datachannel.DataChannel{}, resume: func() error { return resumeSession(s, logger) }, output: output}
 	if err := s.Execute(logger); err != nil {
@@ -59,9 +59,9 @@ type quietLogger struct{ seelog.LoggerInterface }
 // WithContext returns the same disabled logger.
 func (l quietLogger) WithContext(...string) log.T { return l }
 
-// StopWhenSupervisorExits ends the session gracefully once the supervisor's end of
+// stopWhenSupervisorExits ends the session gracefully once the supervisor's end of
 // stdin closes, which also happens when the supervisor is killed.
-func StopWhenSupervisorExits(stdin io.Reader) {
+func stopWhenSupervisorExits(stdin io.Reader) {
 	io.Copy(io.Discard, stdin)                 //nolint:errcheck,gosec // Any read failure means the supervisor is gone.
 	syscall.Kill(os.Getpid(), syscall.SIGTERM) //nolint:errcheck,gosec // Signalling the current process cannot fail.
 }

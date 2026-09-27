@@ -47,10 +47,12 @@ func (s *endpointSSM) StartSession(_ context.Context, input *ssm.StartSessionInp
 func TestClusterEndpointFlowsToForwardingSigningAndTLS(t *testing.T) {
 	t.Parallel()
 	ca := testutil.CA(t)
-	for _, tc := range []struct{ kind, host string }{
-		{"", "writer.cluster.example"}, {profile.ClusterWriter, "writer.cluster.example"}, {profile.ClusterReader, "reader.cluster.example"},
+	for _, tc := range []struct{ name, kind, host string }{
+		{"default", "", "writer.cluster.example"},
+		{"writer", profile.ClusterWriter, "writer.cluster.example"},
+		{"reader", profile.ClusterReader, "reader.cluster.example"},
 	} {
-		t.Run(tc.kind, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			api := clusterRDS{
 				rdsFunc: func(context.Context, *rds.DescribeDBInstancesInput) (*rds.DescribeDBInstancesOutput, error) {

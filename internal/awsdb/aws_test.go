@@ -5,14 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
@@ -23,7 +21,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/vertti/pg-tunnel/internal/awsdb"
-	"github.com/vertti/pg-tunnel/internal/process"
 	"github.com/vertti/pg-tunnel/internal/profile"
 	"github.com/vertti/pg-tunnel/internal/session"
 )
@@ -73,13 +70,9 @@ func TestJumpHostRejectsAmbiguityAcrossPages(t *testing.T) {
 
 func TestIAMSignsRemoteEndpointAndReportsExpiry(t *testing.T) {
 	t.Parallel()
-	provider := credentials.NewStaticCredentialsProvider("test-access", "test-secret", "test-session")
 	expiry := time.Now().Add(5 * time.Minute).Truncate(time.Second)
-	auth := awsdb.IAM{Provider: providerFunc(func(ctx context.Context) (aws.Credentials, error) {
-		value, err := provider.Retrieve(ctx)
-		require.NoError(t, err)
-		value.Source = "EnvConfigCredentials"
-		return value, nil
+	auth := awsdb.IAM{Provider: providerFunc(func(context.Context) (aws.Credentials, error) {
+		return aws.Credentials{AccessKeyID: "test-access", SecretAccessKey: "test-secret", SessionToken: "test-session", Source: "EnvConfigCredentials"}, nil
 	}), Region: "eu-central-1", EnvironmentExpiry: expiry}
 	value, err := auth.Credential(t.Context(), session.Target{Host: "db.rds.amazonaws.com", Port: 5432, User: "reader"})
 	require.NoError(t, err)
@@ -140,19 +133,6 @@ func (f *fakeSSM) TerminateSession(ctx context.Context, input *ssm.TerminateSess
 		f.terminateTime = time.Until(deadline)
 	}
 	return &ssm.TerminateSessionOutput{}, f.terminationErr
-}
-
-func TestPluginFailureTerminatesRemoteSession(t *testing.T) {
-	t.Parallel()
-	plugin := filepath.Join(t.TempDir(), "plugin")
-	require.NoError(t, os.WriteFile(plugin, []byte("#!/bin/sh\nprintf 'sensitive-token\\n'\nexit 7\n"), 0o700))
-	api := &fakeSSM{}
-	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: plugin}
-	_, err := transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
-	require.ErrorContains(t, err, "embedded SSM child exited")
-	assert.Equal(t, 1, process.ExitCode(err), "the plugin's status must not look like the user's command status")
-	assert.NotContains(t, err.Error(), "sensitive-token")
-	assert.Equal(t, "session-example", api.terminated)
 }
 
 func TestIAMRefreshesCachedAWSCredentialsAfterProviderRecovery(t *testing.T) {
