@@ -10,11 +10,29 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/session-manager-plugin/src/communicator"
 	"github.com/aws/session-manager-plugin/src/datachannel"
 	"github.com/aws/session-manager-plugin/src/log"
+	"github.com/aws/session-manager-plugin/src/sessionmanagerplugin/session"
 	"github.com/aws/smithy-go"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
+
+var errCredentialsExpired = errors.New("AWS credentials expired")
+
+func resumeSession(s *session.Session, logger log.T) error {
+	// Only static environment credentials are bounded by this environment value.
+	// Refreshable providers must still get a chance to renew through the AWS code.
+	expiry, err := time.Parse(time.RFC3339, os.Getenv("AWS_CREDENTIAL_EXPIRATION"))
+	if s.Credentials.Source == config.CredentialsSourceName && err == nil && !time.Now().Before(expiry) {
+		return errCredentialsExpired
+	}
+	if err := s.ResumeSessionHandler(logger); err != nil {
+		return fmt.Errorf("resume SSM session: %w", err)
+	}
+	return nil
+}
 
 // RecoveryStarted and RecoveryResumed are the only child progress messages forwarded live.
 const (
@@ -88,24 +106,30 @@ func resumeWithin(ctx context.Context, resume func() error) error {
 	}
 }
 
-// Only known error codes become diagnostics; upstream error text can contain secrets.
+// Only known error codes and HTTP status become diagnostics; upstream text can contain secrets.
 func terminalResumeError(err error) string {
+	if errors.Is(err, errCredentialsExpired) {
+		return errCredentialsExpired.Error()
+	}
 	var api smithy.APIError
-	if !errors.As(err, &api) {
-		return ""
+	if errors.As(err, &api) {
+		switch api.ErrorCode() {
+		case "AccessDenied", "AccessDeniedException", "UnauthorizedOperation":
+			return "AWS denied ssm:ResumeSession"
+		case "ExpiredToken", "ExpiredTokenException":
+			return "AWS credentials expired"
+		case "InvalidClientTokenId", "UnrecognizedClientException":
+			return "AWS credentials were rejected"
+		case "InvalidSessionId", "InvalidSessionIdException", "DoesNotExistException":
+			return "the SSM session no longer exists"
+		}
 	}
-	switch api.ErrorCode() {
-	case "AccessDenied", "AccessDeniedException", "UnauthorizedOperation":
-		return "AWS denied ssm:ResumeSession"
-	case "ExpiredToken", "ExpiredTokenException":
-		return "AWS credentials expired"
-	case "InvalidClientTokenId", "UnrecognizedClientException":
-		return "AWS credentials were rejected"
-	case "InvalidSessionId", "InvalidSessionIdException", "DoesNotExistException":
-		return "the SSM session no longer exists"
-	default:
-		return ""
+	// SSM can reject authentication with a non-JSON body the SDK cannot decode.
+	var response *smithyhttp.ResponseError
+	if errors.As(err, &response) && (response.HTTPStatusCode() == 401 || response.HTTPStatusCode() == 403) {
+		return fmt.Sprintf("AWS rejected SSM authentication or access (HTTP %d)", response.HTTPStatusCode())
 	}
+	return ""
 }
 
 // AWS calls do not accept our context. Allow its signal handler to remove the
