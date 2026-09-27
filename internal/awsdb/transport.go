@@ -74,7 +74,8 @@ func (s *SSM) Open(ctx context.Context, target session.Target) (_ session.Tunnel
 	if err != nil {
 		return nil, fmt.Errorf("SSM StartSession for %s; check ssm:StartSession permission and the target's SSM connectivity: %w", s.Target, err)
 	}
-	handle := &tunnel{api: s.API, sessionID: aws.ToString(output.SessionId), token: aws.ToString(output.TokenValue), port: port, logs: &logTail{report: s.Report}}
+	handle := &tunnel{api: s.API, sessionID: aws.ToString(output.SessionId), token: aws.ToString(output.TokenValue), port: port}
+	handle.logs = &logTail{report: s.Report, token: handle.token}
 	defer func() {
 		if result != nil {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -166,14 +167,14 @@ func (t *tunnel) Port() int { return t.port }
 // Done signals plugin exit.
 func (t *tunnel) Done() <-chan struct{} { return t.process.Done() }
 
-// Err reports plugin failure with the session token redacted.
+// Err reports plugin failure.
 func (t *tunnel) Err() error {
 	err := t.process.Err()
 	if err == nil {
 		err = errors.New("unexpected successful exit")
 	}
 	// The child's exit status is not the user's command status, so it is not wrapped.
-	return fmt.Errorf("embedded SSM child exited: %s: %s", strings.ReplaceAll(t.logs.String(), t.token, "[redacted]"), err.Error())
+	return fmt.Errorf("embedded SSM child exited: %s: %s", t.logs.String(), err.Error())
 }
 
 // Close terminates both the local plugin and remote session.
@@ -243,6 +244,7 @@ func (t *tunnel) waitReady(ctx context.Context) error {
 
 type logTail struct {
 	report  func(string)
+	token   string
 	text    string
 	pending string
 	mu      sync.Mutex
@@ -252,6 +254,9 @@ func (l *logTail) Write(data []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.text += string(data)
+	if l.token != "" {
+		l.text = strings.ReplaceAll(l.text, l.token, "[redacted]")
+	}
 	l.pending += string(data)
 	for {
 		line, rest, found := strings.Cut(l.pending, "\n")
