@@ -2,7 +2,6 @@ package process_test
 
 import (
 	"bytes"
-	"flag"
 	"os"
 	"os/exec"
 	"strings"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/vertti/pg-tunnel/internal/process"
 	"github.com/vertti/pg-tunnel/internal/ptytest"
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 // A job-control shell runs the supervisor; its child stops while holding the
@@ -26,21 +26,13 @@ func TestStoppedChildReturnsTerminalToShell(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash provides the job-control shell")
 	}
-	primary, replicaName, err := ptytest.Open()
+	supervisor := testutil.SelfCommand(t, "TestJobControlSupervisor", "PG_TUNNEL_JOB_CONTROL_SUPERVISOR=1")
+	script := `"$0" "$@"; echo "stopped=$?"; fg >/dev/null; echo "final=$?"`
+	shell := exec.CommandContext(t.Context(), "bash", append([]string{"--norc", "--noprofile", "-i", "-c", script}, supervisor.Args...)...) //nolint:gosec // Runs this test binary under a job-control shell.
+	shell.Env = supervisor.Env
+	primary, err := ptytest.Start(shell)
 	require.NoError(t, err)
-	defer primary.Close()                                                   //nolint:errcheck // Test cleanup of the terminal primary.
-	replica, err := os.OpenFile(replicaName, os.O_RDWR|syscall.O_NOCTTY, 0) //nolint:gosec // The path names the pseudo-terminal opened above.
-	require.NoError(t, err)
-	executable, err := os.Executable()
-	require.NoError(t, err)
-
-	script := `"$0" -test.run='^TestJobControlSupervisor$' "$1"; echo "stopped=$?"; fg >/dev/null; echo "final=$?"`
-	shell := exec.CommandContext(t.Context(), "bash", "--norc", "--noprofile", "-i", "-c", script, executable, coverageFlag()) //nolint:gosec // Runs this test binary under a job-control shell.
-	shell.Env = append(os.Environ(), "PG_TUNNEL_JOB_CONTROL_SUPERVISOR=1")
-	shell.Stdin, shell.Stdout, shell.Stderr = replica, replica, replica
-	shell.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
-	require.NoError(t, shell.Start())
-	require.NoError(t, replica.Close())
+	defer primary.Close() //nolint:errcheck // Test cleanup of the terminal primary.
 
 	var output bytes.Buffer
 	var mu sync.Mutex
@@ -80,14 +72,6 @@ func TestStoppedChildReturnsTerminalToShell(t *testing.T) {
 	assert.True(t, stoppedAt >= 0 && resumedAt > stoppedAt, "the supervisor stops before the child resumes: %q", text)
 	assert.NotContains(t, text, "stopped=0")
 	assert.Contains(t, text, "final=0")
-}
-
-// coverageFlag lets the subprocess contribute to the parent's coverage profile.
-func coverageFlag() string {
-	if dir := flag.Lookup("test.gocoverdir"); dir != nil && dir.Value.String() != "" {
-		return "-test.gocoverdir=" + dir.Value.String()
-	}
-	return "-test.count=1"
 }
 
 func TestJobControlSupervisor(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/vertti/pg-tunnel/internal/ssmplugin"
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 func TestRejectsUnsupportedChildInvocations(t *testing.T) {
@@ -29,10 +30,7 @@ func TestRejectsUnsupportedChildInvocations(t *testing.T) {
 
 func TestChildStopsWhenSupervisorLifelineCloses(t *testing.T) {
 	t.Parallel()
-	executable, err := os.Executable()
-	require.NoError(t, err)
-	child := exec.CommandContext(t.Context(), executable, "-test.run=^TestLifelineChild$") //nolint:gosec // Runs this test binary as the embedded child.
-	child.Env = append(os.Environ(), "PG_TUNNEL_LIFELINE_CHILD=1")
+	child := testutil.SelfCommand(t, "TestLifelineChild", "PG_TUNNEL_LIFELINE_CHILD=1")
 	lifeline, err := child.StdinPipe()
 	require.NoError(t, err)
 	require.NoError(t, child.Start())

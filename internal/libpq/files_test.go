@@ -2,7 +2,6 @@ package libpq_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +15,7 @@ import (
 	"github.com/vertti/pg-tunnel/internal/atomicfile"
 	"github.com/vertti/pg-tunnel/internal/libpq"
 	"github.com/vertti/pg-tunnel/internal/session"
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 func target() session.Target {
@@ -176,10 +176,7 @@ func TestTLSConfigRequiresReadableCertificates(t *testing.T) {
 func TestRecoveryAfterSIGKILL(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "sessions")
-	executable, err := os.Executable()
-	require.NoError(t, err)
-	child := exec.CommandContext(t.Context(), executable, "-test.run=^TestCredentialOwnerHelper$") //nolint:gosec // Execute this test binary in a subprocess to exercise actual process death.
-	child.Env = append(os.Environ(), "PG_TUNNEL_TEST_ROOT="+root)
+	child := testutil.SelfCommand(t, "TestCredentialOwnerHelper", "PG_TUNNEL_TEST_ROOT="+root)
 	require.NoError(t, child.Start())
 	t.Cleanup(func() {
 		if child.ProcessState == nil {

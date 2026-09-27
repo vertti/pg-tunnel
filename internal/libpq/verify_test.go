@@ -3,15 +3,10 @@ package libpq_test
 import (
 	"context"
 	"crypto/tls"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -21,6 +16,7 @@ import (
 
 	"github.com/vertti/pg-tunnel/internal/libpq"
 	"github.com/vertti/pg-tunnel/internal/session"
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 func TestVerifyRequiresTrustedPasswordAuthentication(t *testing.T) {
@@ -39,11 +35,8 @@ func TestVerifyRequiresTrustedPasswordAuthentication(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			certificateServer := httptest.NewTLSServer(http.NotFoundHandler())
-			certificateServer.Close()
+			certPath, certificateServer := testutil.TLSServerCA(t)
 			cert := certificateServer.Certificate()
-			certPath := filepath.Join(t.TempDir(), "ca.pem")
-			require.NoError(t, os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0o600))
 			var config net.ListenConfig
 			listener, err := config.Listen(t.Context(), "tcp4", "127.0.0.1:0")
 			require.NoError(t, err)

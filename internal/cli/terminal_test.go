@@ -4,8 +4,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"os/exec"
-	"syscall"
 	"testing"
 	"time"
 
@@ -14,6 +12,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/vertti/pg-tunnel/internal/ptytest"
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 func TestTerminalInputReadsAndCancelsWhileWaiting(t *testing.T) {
@@ -50,19 +49,10 @@ func TestTerminalInputReadsAndCancelsWhileWaiting(t *testing.T) {
 // pseudo-terminal as its controlling terminal measures an idle read.
 func TestTerminalInputWaitsWithoutSpinning(t *testing.T) {
 	t.Parallel()
-	primary, replicaName, err := ptytest.Open()
+	helper := testutil.SelfCommand(t, "TestIdleTerminalHelper", "PG_TUNNEL_IDLE_TERMINAL_HELPER=1")
+	primary, err := ptytest.Start(helper)
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, primary.Close()) })
-	replica, err := os.OpenFile(replicaName, os.O_RDWR|unix.O_NOCTTY, 0) //nolint:gosec // The path names the pseudo-terminal opened above.
-	require.NoError(t, err)
-	executable, err := os.Executable()
-	require.NoError(t, err)
-	helper := exec.CommandContext(t.Context(), executable, "-test.run=^TestIdleTerminalHelper$") //nolint:gosec // Runs this test binary with a controlling terminal.
-	helper.Env = append(os.Environ(), "PG_TUNNEL_IDLE_TERMINAL_HELPER=1")
-	helper.Stdin, helper.Stdout, helper.Stderr = replica, replica, replica
-	helper.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
-	require.NoError(t, helper.Start())
-	require.NoError(t, replica.Close())
 	go io.Copy(io.Discard, primary) //nolint:errcheck // Drain helper output so it never blocks.
 	require.NoError(t, helper.Wait(), "an idle prompt must not busy-wait")
 }
