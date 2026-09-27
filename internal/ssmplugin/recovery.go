@@ -59,6 +59,7 @@ func (c *recoveryChannel) Initialize(logger log.T, clientID, sessionID, targetID
 		if err := resumeWithin(ctx, c.resume); err != nil {
 			fmt.Fprintln(c.output, err) //nolint:errcheck // Exit and supervisor cleanup must still happen if output fails.
 			stopAfterRecovery()
+			return
 		}
 		fmt.Fprintln(c.output, RecoveryResumed) //nolint:errcheck // Diagnostics are best effort; the supervisor owns the output pipe.
 	})

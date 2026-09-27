@@ -23,7 +23,7 @@ type Group struct {
 // Start starts a command in its own process group. The caller must call Stop.
 func Start(ctx context.Context, args, env []string, stdin io.Reader, stdout, stderr io.Writer) (*Group, error) {
 	if len(args) == 0 {
-		return nil, errors.New("missing command after --")
+		return nil, errors.New("missing command")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("start process: %w", err)

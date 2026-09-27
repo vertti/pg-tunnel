@@ -101,6 +101,7 @@ func validateBundle(data []byte) error {
 		return errors.New("RDS CA bundle exceeds 1 MiB")
 	}
 	currentCA := false
+	now := time.Now()
 	for len(bytes.TrimSpace(data)) > 0 {
 		block, rest := pem.Decode(data)
 		if block == nil || block.Type != "CERTIFICATE" {
@@ -113,7 +114,6 @@ func validateBundle(data []byte) error {
 		if !certificate.IsCA {
 			return errors.New("RDS CA bundle contains a non-CA certificate")
 		}
-		now := time.Now()
 		currentCA = currentCA || (!now.Before(certificate.NotBefore) && now.Before(certificate.NotAfter))
 		data = rest
 	}

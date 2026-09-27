@@ -291,5 +291,5 @@ func databaseAuth(p *profile.Profile, cfg *aws.Config, report func(string)) (ses
 	if err != nil {
 		return nil, err
 	}
-	return awsdb.IAM{Provider: cfg.Credentials, Region: cfg.Region, EnvironmentExpiry: expiry, Report: report}, nil
+	return &awsdb.IAM{Provider: cfg.Credentials, Region: cfg.Region, EnvironmentExpiry: expiry, Report: report}, nil
 }
