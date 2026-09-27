@@ -59,9 +59,10 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 	return execute(ctx, &p, sessionCommand(command, stdout, report), report)
 }
 
+var verifyOnly session.Command = func(ctx context.Context, _ []string) error { return ctx.Err() }
+
 func checkConnection(ctx context.Context, p *profile.Profile, output io.Writer) error {
-	verified := func(ctx context.Context, _ []string) error { return ctx.Err() }
-	if err := execute(ctx, p, verified, reporter(output)); err != nil {
+	if err := execute(ctx, p, verifyOnly, reporter(output)); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(output, "Connection check passed; local tunnel and temporary credentials cleaned up."); err != nil {
@@ -74,6 +75,8 @@ func reporter(output io.Writer) func(string) {
 	logger := log.New(output, "pg-tunnel: ", 0)
 	return func(message string) { logger.Print(message) }
 }
+
+const setupTimeout = 30 * time.Second
 
 var sessionSyntax = map[string]string{
 	"run":     "run [--config PATH] CONNECTION -- COMMAND [ARGS...]",
@@ -121,7 +124,7 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	if p.Environment == profile.EnvironmentProduction {
 		report("WARNING: PRODUCTION connection. Database changes affect the production environment.")
 	}
-	setupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	setupCtx, cancel := context.WithTimeout(ctx, setupTimeout)
 	defer cancel()
 	cfg, err := awsConfig(setupCtx, p)
 	if err != nil {
@@ -161,14 +164,15 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 }
 
 func prepareRootCert(ctx context.Context, p *profile.Profile, region string, report func(string)) error {
-	if p.RootCert == "" {
-		var err error
-		if p.RootCert, err = awsdb.RDSCA(ctx, region, report); err != nil {
-			return fmt.Errorf("prepare RDS certificates: %w", err)
+	if p.RootCert != "" {
+		if _, err := libpq.TLSConfig(session.Target{RootCert: p.RootCert}); err != nil {
+			return fmt.Errorf("validate CA certificate: %w", err)
 		}
+		return nil
 	}
-	if _, err := libpq.TLSConfig(session.Target{RootCert: p.RootCert}); err != nil {
-		return fmt.Errorf("validate CA certificate: %w", err)
+	var err error
+	if p.RootCert, err = awsdb.RDSCA(ctx, region, report); err != nil {
+		return fmt.Errorf("prepare RDS certificates: %w", err)
 	}
 	return nil
 }

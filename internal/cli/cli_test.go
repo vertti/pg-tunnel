@@ -163,3 +163,15 @@ func TestInitHelpRequiresNeitherTerminalNorAWS(t *testing.T) {
 	assert.NotContains(t, output.String(), "\n  -profile string\n")
 	assert.Contains(t, output.String(), "-config")
 }
+
+func TestRootHelpListsEachCommandsSyntax(t *testing.T) {
+	t.Parallel()
+	var root bytes.Buffer
+	require.NoError(t, cli.RunContext(t.Context(), []string{"--help"}, &root, io.Discard))
+	for _, command := range []string{"run", "connect", "check", "init", "cleanup"} {
+		var output bytes.Buffer
+		require.NoError(t, cli.RunContext(t.Context(), []string{command, "--help"}, &output, io.Discard))
+		usage, _, _ := strings.Cut(output.String(), "\n")
+		assert.Contains(t, root.String(), "  "+strings.TrimPrefix(usage, "Usage: ")+"\n", command)
+	}
+}
