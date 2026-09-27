@@ -21,20 +21,20 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		flags.PrintDefaults()
 	}
 	var p profile.Profile
-	flags.StringVar(&p.RootCert, "sslrootcert", "", "optional custom CA PEM file (default: automatically managed AWS RDS bundle)")
-	flags.StringVar(&p.Region, "region", "", "AWS region (defaults to AWS configuration)")
-	flags.StringVar(&p.AWSProfile, "aws-profile", "", "AWS profile to use and save (defaults to current AWS credentials)")
-	flags.StringVar(&p.AWSProfile, "profile", "", "alias for --aws-profile")
-	path := flags.String("config", "", "destination JSON file (defaults to shared user configuration)")
+	flags.StringVar(&p.RootCert, "sslrootcert", "", "optional custom CA `PEM` file (default: automatically managed AWS RDS bundle)")
+	flags.StringVar(&p.Region, "region", "", "AWS `REGION` (defaults to AWS configuration)")
+	flags.StringVar(&p.AWSProfile, "aws-profile", "", "AWS `PROFILE` to use and save (defaults to current AWS credentials)")
+	var path string
+	configFlag(flags, &path, "`PATH` of the destination JSON file (defaults to shared user configuration)")
 	if help, err := parseFlags(flags, args, stdout); help || err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return usageError("init takes no arguments; pass the AWS profile with --aws-profile")
+		return usageError("init", "init takes no arguments; pass the AWS profile with --aws-profile")
 	}
-	if *path == "" {
+	if path == "" {
 		var err error
-		*path, err = profile.UserPath()
+		path, err = profile.UserPath()
 		if err != nil {
 			return fmt.Errorf("select configuration destination: %w", err)
 		}
@@ -52,7 +52,7 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err != nil {
 		return err
 	}
-	wizard := setup.Wizard{Input: terminalInput{fd: terminal, done: ctx.Done()}, Output: stderr, Config: cfg, AWSProfile: p.AWSProfile, RootCert: p.RootCert, Path: *path}
+	wizard := setup.Wizard{Input: terminalInput{fd: terminal, done: ctx.Done()}, Output: stderr, Config: cfg, AWSProfile: p.AWSProfile, RootCert: p.RootCert, Path: path}
 	wizard.Verify = func(verifyCtx context.Context, candidate *profile.Profile) error {
 		return execute(verifyCtx, candidate, func(context.Context, []string) error { return nil }, reporter(stderr))
 	}
