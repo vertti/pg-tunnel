@@ -30,7 +30,6 @@ type clusterRDS struct {
 	describe func(context.Context, *rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error)
 }
 
-// DescribeDBClusters supplies the cluster lookup separately from instance discovery.
 func (c clusterRDS) DescribeDBClusters(ctx context.Context, input *rds.DescribeDBClustersInput, _ ...func(*rds.Options)) (*rds.DescribeDBClustersOutput, error) {
 	return c.describe(ctx, input)
 }
@@ -40,7 +39,6 @@ type endpointSSM struct {
 	fakeSSM
 }
 
-// StartSession records forwarding identity and stops before opening a remote session.
 func (s *endpointSSM) StartSession(_ context.Context, input *ssm.StartSessionInput, _ ...func(*ssm.Options)) (*ssm.StartSessionOutput, error) {
 	s.input = input
 	return nil, errors.New("fixture stops before starting a remote session")

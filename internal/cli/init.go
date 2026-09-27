@@ -39,8 +39,6 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 			return fmt.Errorf("select configuration destination: %w", err)
 		}
 	}
-	// /dev/tty is not supported by Go's poller on every platform. Read it
-	// nonblocking and wait with select so cancellation never depends on Close.
 	terminal, err := unix.Open("/dev/tty", unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return fmt.Errorf("init is interactive and needs a terminal; without one, write pg-tunnel.json by hand: %w", err)
@@ -62,8 +60,8 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	return nil
 }
 
-// terminalInput waits at most 100 ms before observing cancellation, including on
-// macOS where /dev/tty cannot be registered with Go's runtime poller.
+// terminalInput selects on /dev/tty because Go cannot poll it on macOS;
+// cancellation is observed within 100 ms.
 type terminalInput struct {
 	done <-chan struct{}
 	fd   int
@@ -76,7 +74,6 @@ func (input terminalInput) Read(buffer []byte) (int, error) {
 			return 0, context.Canceled
 		default:
 		}
-		// macOS poll reports /dev/tty as always ready, which would spin; select does not.
 		var readable unix.FdSet
 		readable.Set(input.fd)
 		if _, err := unix.Select(input.fd+1, &readable, nil, nil, &unix.Timeval{Usec: 100_000}); err != nil {

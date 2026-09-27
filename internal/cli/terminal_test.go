@@ -45,8 +45,6 @@ func TestTerminalInputReadsAndCancelsWhileWaiting(t *testing.T) {
 	}
 }
 
-// init reads /dev/tty, which macOS poll reports as always ready. A helper with a
-// pseudo-terminal as its controlling terminal measures an idle read.
 func TestTerminalInputWaitsWithoutSpinning(t *testing.T) {
 	t.Parallel()
 	helper := testutil.SelfCommand(t, "TestIdleTerminalHelper", "PG_TUNNEL_IDLE_TERMINAL_HELPER=1")

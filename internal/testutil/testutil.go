@@ -50,9 +50,9 @@ func SeedRDSCA(t *testing.T, ca string) {
 	require.NoError(t, err)
 	managed := filepath.Join(cache, "pg-tunnel", "certificates", "aws.pem")
 	require.NoError(t, os.MkdirAll(filepath.Dir(managed), 0o700))
-	data, err := os.ReadFile(ca) //nolint:gosec // The caller's fixture file.
+	data, err := os.ReadFile(ca)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(managed, data, 0o600)) //nolint:gosec // Inside the isolated cache directory.
+	require.NoError(t, os.WriteFile(managed, data, 0o600))
 }
 
 // SelfCommand runs one test of the current test binary in a subprocess with
@@ -61,7 +61,7 @@ func SelfCommand(t *testing.T, test string, env ...string) *exec.Cmd {
 	t.Helper()
 	executable, err := os.Executable()
 	require.NoError(t, err)
-	command := exec.CommandContext(t.Context(), executable, "-test.run=^"+test+"$", coverageFlag()) //nolint:gosec // Runs this test binary.
+	command := exec.CommandContext(t.Context(), executable, "-test.run=^"+test+"$", coverageFlag())
 	command.Env = append(os.Environ(), env...)
 	return command
 }

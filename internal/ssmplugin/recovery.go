@@ -40,7 +40,6 @@ const (
 	RecoveryResumed = "SSM data channel resumed; client and local port retained. Retry failed database operations only when safe; SQL is not replayed."
 )
 
-// Install the callback before AWS opens the socket, without changing its protocol.
 type recoveryChannel struct {
 	*datachannel.DataChannel
 	resume func() error

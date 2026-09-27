@@ -119,7 +119,7 @@ func TestWizardDiscoversAcrossPagesAndSavesOnlyAfterConfirmation(t *testing.T) {
 			assert.Equal(t, 5433, saved.Port)
 			assert.Equal(t, ca, saved.RootCert)
 			assert.Equal(t, "dev", saved.AWSProfile)
-			contents, err := os.ReadFile(path) //nolint:gosec // The path is inside t.TempDir.
+			contents, err := os.ReadFile(path)
 			require.NoError(t, err)
 			assert.NotContains(t, string(contents), "secret:master")
 		})
@@ -217,7 +217,7 @@ func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			original := profile.Profile{DBInstance: "existing", Database: "data", User: "reader", Target: "i-existing", RootCert: ca, Port: 5432}
 			require.NoError(t, profile.Save(path, "existing", &original))
-			before, err := os.ReadFile(path) //nolint:gosec // The configuration is inside t.TempDir.
+			before, err := os.ReadFile(path)
 			require.NoError(t, err)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -226,7 +226,7 @@ func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
 			wizard := setup.Wizard{Config: fixtureConfig(t, ""), Input: strings.NewReader("1\n1\n1\ndata\nreader\n\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
 			wizard.Verify = func(_ context.Context, candidate *profile.Profile) error {
 				// The new profile is not on disk while the test session is running.
-				current, readErr := os.ReadFile(path) //nolint:gosec // The configuration is inside t.TempDir.
+				current, readErr := os.ReadFile(path)
 				require.NoError(t, readErr)
 				assert.Equal(t, before, current)
 				assert.Equal(t, "i-chosen", candidate.Target)
@@ -259,7 +259,7 @@ func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
 				require.ErrorIs(t, err, failure)
 				require.ErrorContains(t, err, "configuration was not saved")
 			}
-			after, readErr := os.ReadFile(path) //nolint:gosec // The configuration is inside t.TempDir.
+			after, readErr := os.ReadFile(path)
 			require.NoError(t, readErr)
 			assert.Equal(t, before, after)
 			assert.NotContains(t, output.String(), "Saved verified connection")
@@ -316,9 +316,9 @@ func TestWizardPasswordAuthentication(t *testing.T) {
 		name, input, secret, user string
 		disableIAM, cancel        bool
 	}{
-		{name: "linked master", input: "2\n\n\n\n", secret: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:master", user: "admin"}, //nolint:gosec // Synthetic secret ARN, not a credential.
+		{name: "linked master", input: "2\n\n\n\n", secret: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:master", user: "admin"},
 		{name: "custom secret", input: "2\napplication/reader\n\nreader\n", secret: "application/reader", user: "reader"},
-		{name: "IAM disabled", input: "\n\n\n\n", secret: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:master", user: "admin", disableIAM: true}, //nolint:gosec // Synthetic secret ARN, not a credential.
+		{name: "IAM disabled", input: "\n\n\n\n", secret: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:master", user: "admin", disableIAM: true},
 		{name: "cancelled", input: "2\napplication/reader\n\nreader\n", cancel: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

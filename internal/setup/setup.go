@@ -241,7 +241,6 @@ func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error
 	return ui.print("Saved verified connection %q to %q. Connect with:\n  %s\n", name, w.Path, connectCommand(w.Path, name))
 }
 
-// connectCommand omits --config when run would select path by itself.
 func connectCommand(path, name string) string {
 	command := "pg-tunnel run "
 	if !selectedByDefault(path) {

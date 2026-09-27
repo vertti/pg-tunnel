@@ -86,6 +86,9 @@ linters:
       enable-all: true
   exclusions:
     presets: []
+    rules:
+      - path: (_test\.go$|^internal/testutil/)
+        linters: [gosec]
 
 formatters:
   enable:

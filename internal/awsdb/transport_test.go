@@ -43,7 +43,6 @@ type localSSM struct {
 	fakeSSM
 }
 
-// StartSession directs the real embedded AWS code to a local WebSocket fixture.
 func (f *localSSM) StartSession(_ context.Context, input *ssm.StartSessionInput, _ ...func(*ssm.Options)) (*ssm.StartSessionOutput, error) {
 	if f.port != nil {
 		f.port <- input.Parameters["localPortNumber"][0]
@@ -62,8 +61,7 @@ func TestEmbeddedStartupCancellationCleansUp(t *testing.T) {
 	}))
 	defer server.Close()
 	api := &localSSM{url: "ws" + strings.TrimPrefix(server.URL, "http") + "/?X-Amz-Signature=fixture"}
-	// Release smoke tests supply the packaged executable; otherwise use this test binary.
-	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: os.Getenv("PG_TUNNEL_TEST_EXECUTABLE")}
+	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: testExecutable()}
 	_, err := transport.Open(ctx, session.Target{Host: "db.example", Port: 5432})
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, "session-example", api.terminated)
@@ -104,7 +102,7 @@ func receiveSessionToken(w http.ResponseWriter, r *http.Request, cancel context.
 func TestChildReceivesTokenOnlyOnStdin(t *testing.T) {
 	t.Parallel()
 	// A tiny executable records the child contract and echoes the fake token to
-	// exercise output redaction. The actual AWS handshake is tested above.
+	// exercise output redaction.
 	executable := t.TempDir() + "/child"
 	script := `#!/bin/sh
 [ "$1" = '__ssm' ] || exit 8
@@ -116,7 +114,7 @@ IFS= read -r response
 printf '%s' "$response"
 exit 7
 `
-	require.NoError(t, os.WriteFile(executable, []byte(script), 0o700)) //nolint:gosec // Only the owner may execute the test fixture.
+	require.NoError(t, os.WriteFile(executable, []byte(script), 0o700))
 	api := &fakeSSM{}
 	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: executable}
 	_, err := transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
@@ -141,8 +139,7 @@ func TestEmbeddedShutdownSendsTerminationFlag(t *testing.T) {
 	}))
 	defer server.Close()
 	api := &localSSM{url: "ws" + strings.TrimPrefix(server.URL, "http") + "/?X-Amz-Signature=fixture", port: port}
-	// Release smoke tests supply the packaged executable; otherwise use this test binary.
-	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: os.Getenv("PG_TUNNEL_TEST_EXECUTABLE")}
+	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: testExecutable()}
 	tunnel, err := transport.Open(ctx, session.Target{Host: "db.example", Port: 5432})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, tunnel.Close(t.Context())) })
@@ -225,3 +222,6 @@ type oversizedSSM struct{ fakeSSM }
 func (*oversizedSSM) StartSession(context.Context, *ssm.StartSessionInput, ...func(*ssm.Options)) (*ssm.StartSessionOutput, error) {
 	return &ssm.StartSessionOutput{SessionId: aws.String("session-example"), TokenValue: aws.String(strings.Repeat("t", 16<<10)), StreamUrl: aws.String("wss://example.invalid")}, nil
 }
+
+// testExecutable is the packaged binary in release smoke tests, or empty to use this test binary.
+func testExecutable() string { return os.Getenv("PG_TUNNEL_TEST_EXECUTABLE") }

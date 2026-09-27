@@ -17,7 +17,7 @@ type usageErr string
 
 func (e usageErr) Error() string { return string(e) }
 
-// Is makes errors.Is match ErrUsage without printing its text.
+// Is matches ErrUsage.
 func (usageErr) Is(target error) bool { return target == ErrUsage }
 
 const help = `pg-tunnel connects PostgreSQL clients to private AWS RDS databases through SSM.
@@ -92,7 +92,7 @@ func parseFlags(flags *flag.FlagSet, args []string, stdout io.Writer) (help bool
 func rootOptions(args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("pg-tunnel", flag.ContinueOnError)
 	flags.Usage = func() {
-		fmt.Fprint(flags.Output(), help) //nolint:errcheck // flag.Usage has no error return; normal command output errors are returned separately.
+		fmt.Fprint(flags.Output(), help) //nolint:errcheck // flag.Usage has no error return.
 		flags.PrintDefaults()
 	}
 	version := flags.Bool("version", false, "print version and build commit")

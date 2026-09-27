@@ -28,7 +28,7 @@ func TestStoppedChildReturnsTerminalToShell(t *testing.T) {
 	}
 	supervisor := testutil.SelfCommand(t, "TestJobControlSupervisor", "PG_TUNNEL_JOB_CONTROL_SUPERVISOR=1")
 	script := `"$0" "$@"; echo "stopped=$?"; fg >/dev/null; echo "final=$?"`
-	shell := exec.CommandContext(t.Context(), "bash", append([]string{"--norc", "--noprofile", "-i", "-c", script}, supervisor.Args...)...) //nolint:gosec // Runs this test binary under a job-control shell.
+	shell := exec.CommandContext(t.Context(), "bash", append([]string{"--norc", "--noprofile", "-i", "-c", script}, supervisor.Args...)...)
 	shell.Env = supervisor.Env
 	primary, err := ptytest.Start(shell)
 	require.NoError(t, err)
