@@ -35,8 +35,15 @@ Or download an archive from the
 [latest release](https://github.com/vertti/pg-tunnel/releases/latest) and follow
 the [installation steps](docs/install.md).
 
-With working AWS credentials, let `init` find your database and jump host, test
-the connection, and save it under a connection name:
+Before you start, you need:
+
+- an SSM-managed jump host that can reach the database
+- the [AWS permissions](docs/usage.md#aws-access) for your login method, and for
+  IAM login, `rds_iam` granted to the database user
+- working AWS credentials (for SSO, run `aws sso login` first)
+
+In a terminal, let `init` find your database and jump host, test the connection,
+and save it under a connection name:
 
 ```sh
 pg-tunnel init --aws-profile YOUR_AWS_PROFILE   # or omit it to use your current credentials
@@ -58,18 +65,10 @@ import psycopg
 conn = psycopg.connect("")
 ```
 
-`pg-tunnel` manages private connection files and removes them on shutdown.
-Your shared `~/.pgpass` stays untouched. See the
+`pg-tunnel` manages private connection files and removes them on shutdown. See the
 [client guide](docs/usage.md#client-behavior) for existing notebook servers and
 separately launched clients, and the [compatibility list](docs/compatibility.md)
 for tested clients, credential renewal and known limitations.
-
-## Development
-
-```sh
-mise run fmt
-mise run ci
-```
 
 [Configuration and usage](docs/usage.md) · [Contributor notes](docs/development.md)
 

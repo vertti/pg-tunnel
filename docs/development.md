@@ -68,7 +68,10 @@ connection. Both modes verify local credential and listener cleanup; failures
 exit nonzero. They do not change system network settings or existing notebooks.
 
 For container renewal, use the [Docker recipe](containers.md) with AWS credentials
-valid for at least 20 minutes. Add a mount for
+valid for at least 20 minutes. To test your checkout instead of the latest release,
+build the binary with
+`mise x -- env GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/pg-tunnel-linux ./cmd/pg-tunnel`
+(use Docker's architecture). Add a mount for
 `scripts/check-container-renewal.sh` at `/run/check.sh`, then replace the entrypoint
 and command with:
 

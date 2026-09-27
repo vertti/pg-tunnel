@@ -34,7 +34,8 @@ uses the standard AWS credential sources and saves your selected AWS profile.
 The wizard finds RDS databases and SSM jump hosts, then asks for your database
 name, user and authentication method. It tests TLS and database access before
 saving. Add `--config pg-tunnel.json` to save in the project instead of your user
-config. Existing connection names are not overwritten.
+config, or `--sslrootcert PEM` to use your own CA instead of the managed RDS bundle.
+Existing connection names are not overwritten.
 
 | Setting | Meaning |
 | --- | --- |
