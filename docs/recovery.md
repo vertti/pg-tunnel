@@ -12,8 +12,8 @@ Remote cleanup errors are reported if AWS cannot confirm termination.
 If nonrenewable AWS credentials expire, renew AWS access to terminate any
 remaining remote session.
 
-Recovery has been verified with idle and active read-only notebook queries and
-two-minute process suspension. Actual laptop sleep remains unverified. If
-connections continue to fail, save your work before restarting pg-tunnel and Jupyter.
+Recovery is verified with read-only notebook queries and two-minute laptop sleep
+on macOS. If connections continue to fail, save your work before restarting
+pg-tunnel and Jupyter.
 
 Maintainers can run the [live recovery checks](development.md#live-checks).
