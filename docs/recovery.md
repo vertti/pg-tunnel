@@ -9,6 +9,8 @@ Interrupted queries or transactions may still fail; pg-tunnel never replays SQL.
 If recovery times out, authorization is rejected, or the SSM session no longer
 exists, pg-tunnel stops the client command and removes its temporary credentials.
 Remote cleanup errors are reported if AWS cannot confirm termination.
+If nonrenewable AWS credentials expire, renew AWS access to terminate any
+remaining remote session.
 
 Recovery has been verified with idle and active read-only notebook queries and
 two-minute process suspension. Actual laptop sleep remains unverified. If
