@@ -1,11 +1,11 @@
 [tools]
 go = "1.27.1"
-golangci-lint = "2.13.2"
+golangci-lint = "2.14.0"
 actionlint = "1.7.12"
 shellcheck = "0.11.0"
 zizmor = "1.30.1"
 goreleaser = "2.18.2"
-uv = "0.12.10"
+uv = "0.12.19"
 upx = { version = "5.2.1", os = ["linux"] }
 "go:github.com/google/go-licenses/v2" = "2.0.1"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.8.0"

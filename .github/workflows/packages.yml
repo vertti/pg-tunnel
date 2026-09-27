@@ -21,7 +21,7 @@ concurrency:
 jobs:
   package:
     name: Build archives
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         with:
-          version: "2026.9.1"
+          version: "2026.9.15"
           cache: ${{ !inputs.release }} # Releases use freshly installed tools.
           cache_save: ${{ github.event_name == 'push' }} # Pull requests restore caches saved on main.
       - id: package-cache
@@ -81,13 +81,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
+          - runner: ubuntu-26.04
             platform: linux_amd64
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-26.04-arm
             platform: linux_arm64
-          - runner: macos-15
+          - runner: macos-26
             platform: darwin_arm64
-          - runner: macos-15-intel
+          - runner: macos-26-intel
             platform: darwin_amd64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
@@ -97,7 +97,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         with:
-          version: "2026.9.1"
+          version: "2026.9.15"
           cache: ${{ !inputs.release }} # Releases use freshly installed tools.
           cache_save: ${{ github.event_name == 'push' }}
           install_args: go
@@ -149,7 +149,7 @@ jobs:
     name: Release packages
     if: always()
     needs: [package, smoke]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 1
     steps:
       - env:
