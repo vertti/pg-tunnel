@@ -87,6 +87,8 @@ jobs:
             platform: linux_arm64
           - runner: macos-15
             platform: darwin_arm64
+          - runner: macos-15-intel
+            platform: darwin_amd64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     steps:
