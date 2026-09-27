@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/vertti/pg-tunnel/internal/profile"
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 const valid = `{"profiles":{"dev":{"db_instance":"example","database":"data","user":"reader","target":"i-example","sslrootcert":"ca.pem"}}}`
@@ -55,11 +56,9 @@ func TestInvalidProfilesFailBeforeAWSAccess(t *testing.T) {
 func TestLoadConfigurationPrecedence(t *testing.T) {
 	directory := t.TempDir()
 	t.Chdir(directory)
-	t.Setenv("HOME", filepath.Join(directory, "home"))
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(directory, "config"))
-	userDirectory, err := os.UserConfigDir()
+	testutil.IsolateHome(t)
+	userPath, err := profile.UserPath()
 	require.NoError(t, err)
-	userPath := filepath.Join(userDirectory, "pg-tunnel", "pg-tunnel.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(userPath), 0o700))
 	require.NoError(t, os.WriteFile(userPath, []byte(valid), 0o600))
 
@@ -109,11 +108,9 @@ func TestProjectConfigCannotChooseHostOrCA(t *testing.T) {
 func TestLoadDoesNotFallBackFromExistingProjectConfig(t *testing.T) {
 	directory := t.TempDir()
 	t.Chdir(directory)
-	t.Setenv("HOME", filepath.Join(directory, "home"))
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(directory, "config"))
-	userDirectory, err := os.UserConfigDir()
+	testutil.IsolateHome(t)
+	userPath, err := profile.UserPath()
 	require.NoError(t, err)
-	userPath := filepath.Join(userDirectory, "pg-tunnel", "pg-tunnel.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(userPath), 0o700))
 	require.NoError(t, os.WriteFile(userPath, []byte(valid), 0o600))
 
@@ -136,13 +133,12 @@ func TestLoadDoesNotFallBackFromExistingProjectConfig(t *testing.T) {
 
 func TestLoadMissingConfigurationReportsLocations(t *testing.T) {
 	t.Chdir(t.TempDir())
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
-	userDirectory, err := os.UserConfigDir()
+	testutil.IsolateHome(t)
+	userPath, err := profile.UserPath()
 	require.NoError(t, err)
 	_, err = profile.Load("", "dev")
 	require.ErrorContains(t, err, "pg-tunnel.json in the current directory")
-	require.ErrorContains(t, err, filepath.Join(userDirectory, "pg-tunnel", "pg-tunnel.json"))
+	require.ErrorContains(t, err, userPath)
 	require.ErrorContains(t, err, "create one with pg-tunnel init or use --config PATH")
 }
 

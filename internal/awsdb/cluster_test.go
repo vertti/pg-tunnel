@@ -2,11 +2,8 @@ package awsdb_test
 
 import (
 	"context"
-	"encoding/pem"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,6 +22,7 @@ import (
 	"github.com/vertti/pg-tunnel/internal/awsdb"
 	"github.com/vertti/pg-tunnel/internal/libpq"
 	"github.com/vertti/pg-tunnel/internal/profile"
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 type clusterRDS struct {
@@ -50,10 +48,7 @@ func (s *endpointSSM) StartSession(_ context.Context, input *ssm.StartSessionInp
 
 func TestClusterEndpointFlowsToForwardingSigningAndTLS(t *testing.T) {
 	t.Parallel()
-	certServer := httptest.NewTLSServer(http.NotFoundHandler())
-	certServer.Close()
-	ca := filepath.Join(t.TempDir(), "ca.pem")
-	require.NoError(t, os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certServer.Certificate().Raw}), 0o600))
+	ca := testutil.CA(t)
 	for _, tc := range []struct{ kind, host string }{
 		{"", "writer.cluster.example"}, {profile.ClusterWriter, "writer.cluster.example"}, {profile.ClusterReader, "reader.cluster.example"},
 	} {

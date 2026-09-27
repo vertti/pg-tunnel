@@ -3,12 +3,10 @@ package setup_test
 import (
 	"bytes"
 	"context"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,6 +20,7 @@ import (
 
 	"github.com/vertti/pg-tunnel/internal/profile"
 	"github.com/vertti/pg-tunnel/internal/setup"
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 type httpFunc func(*http.Request) (*http.Response, error)
@@ -81,18 +80,9 @@ func ec2Page(body string) string {
 	return `<DescribeInstancesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">` + contents + `</DescribeInstancesResponse>`
 }
 
-func certificate(t *testing.T) string {
-	t.Helper()
-	server := httptest.NewTLSServer(http.NotFoundHandler())
-	t.Cleanup(server.Close)
-	path := filepath.Join(t.TempDir(), "ca.pem")
-	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0o600))
-	return path
-}
-
 func TestWizardDiscoversAcrossPagesAndSavesOnlyAfterConfirmation(t *testing.T) {
 	t.Parallel()
-	ca := certificate(t)
+	ca := testutil.CA(t)
 	for _, answer := range []string{"yes", "no", "", "EOF"} {
 		t.Run(answer, func(t *testing.T) {
 			t.Parallel()
@@ -138,7 +128,7 @@ func TestWizardDiscoversAcrossPagesAndSavesOnlyAfterConfirmation(t *testing.T) {
 
 func TestWizardDiscoveryPermissionFailures(t *testing.T) {
 	t.Parallel()
-	ca := certificate(t)
+	ca := testutil.CA(t)
 	for _, service := range []string{"sts", "rds", "ssm", "ec2"} {
 		t.Run(service, func(t *testing.T) {
 			t.Parallel()
@@ -220,7 +210,7 @@ func successfulVerification(context.Context, *profile.Profile) error { return ni
 
 func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
 	t.Parallel()
-	ca := certificate(t)
+	ca := testutil.CA(t)
 	for _, result := range []string{"success", "login failure", "cleanup failure", "cancelled"} {
 		t.Run(result, func(t *testing.T) {
 			t.Parallel()
@@ -279,7 +269,7 @@ func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
 
 func TestWizardDefaultsToUniqueResources(t *testing.T) {
 	t.Parallel()
-	ca := certificate(t)
+	ca := testutil.CA(t)
 	for _, tc := range []struct {
 		name, input, target, prompt string
 		singleHost                  bool
@@ -355,7 +345,7 @@ func TestWizardPasswordAuthentication(t *testing.T) {
 			var output bytes.Buffer
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			verified := false
-			wizard := setup.Wizard{Config: cfg, Input: strings.NewReader("1\n1\n" + tc.input + "4\npassword-connection\n" + answer + "\n"), Output: &output, Path: path, RootCert: certificate(t)}
+			wizard := setup.Wizard{Config: cfg, Input: strings.NewReader("1\n1\n" + tc.input + "4\npassword-connection\n" + answer + "\n"), Output: &output, Path: path, RootCert: testutil.CA(t)}
 			wizard.Verify = func(_ context.Context, p *profile.Profile) error {
 				verified = true
 				assert.Equal(t, profile.AuthSecretsManager, p.Auth)

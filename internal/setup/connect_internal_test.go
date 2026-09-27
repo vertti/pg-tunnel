@@ -2,20 +2,19 @@ package setup
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/vertti/pg-tunnel/internal/profile"
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 func TestConnectCommandOmitsDefaultConfig(t *testing.T) {
 	directory := t.TempDir()
 	t.Chdir(directory)
-	t.Setenv("HOME", filepath.Join(directory, "home"))
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(directory, "config"))
+	testutil.IsolateHome(t)
 	user, err := profile.UserPath()
 	require.NoError(t, err)
 	assert.Equal(t, "pg-tunnel run 'dev' -- psql", connectCommand(user, "dev"))

@@ -2,7 +2,6 @@ package setup_test
 
 import (
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/vertti/pg-tunnel/internal/profile"
 	"github.com/vertti/pg-tunnel/internal/setup"
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 // Secrets Manager with every suggested default: database, jump host, auth, secret,
@@ -20,7 +20,7 @@ var passwordAnswers = []string{"1", "1", "2", "", "", "", "", "readonly", "yes"}
 
 func TestWizardWritesNothingWhenInputEndsAtAnyPrompt(t *testing.T) {
 	t.Parallel()
-	ca := certificate(t)
+	ca := testutil.CA(t)
 	for answered := range passwordAnswers {
 		path := filepath.Join(t.TempDir(), "profiles.json")
 		input := strings.Join(passwordAnswers[:answered], "\n")
@@ -45,7 +45,7 @@ func (w *limitedWriter) Write(data []byte) (int, error) {
 
 func TestWizardReportsEveryOutputFailure(t *testing.T) {
 	t.Parallel()
-	ca := certificate(t)
+	ca := testutil.CA(t)
 	input := strings.Join(passwordAnswers, "\n") + "\n"
 	for writes := 0; ; writes++ {
 		require.Less(t, writes, 200, "the wizard never completed")
@@ -61,7 +61,7 @@ func TestWizardReportsEveryOutputFailure(t *testing.T) {
 
 func TestWizardRequiresUniqueName(t *testing.T) {
 	t.Parallel()
-	ca := certificate(t)
+	ca := testutil.CA(t)
 	input := strings.Join(passwordAnswers, "\n") + "\n"
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	existing := profile.Profile{DBInstance: "other", Database: "data", User: "reader", Target: "i-other", Port: 5432}
@@ -74,16 +74,8 @@ func TestWizardRequiresUniqueName(t *testing.T) {
 }
 
 func TestWizardPreparesManagedCertificates(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
-	cache, err := os.UserCacheDir()
-	require.NoError(t, err)
-	managed := filepath.Join(cache, "pg-tunnel", "certificates", "aws.pem")
-	require.NoError(t, os.MkdirAll(filepath.Dir(managed), 0o700))
-	data, err := os.ReadFile(certificate(t))
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(managed, data, 0o600)) //nolint:gosec // The path is inside the test's temporary directory.
+	testutil.IsolateHome(t)
+	testutil.SeedRDSCA(t, testutil.CA(t))
 
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	input := strings.Join(passwordAnswers, "\n") + "\n"
