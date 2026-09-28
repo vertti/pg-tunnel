@@ -50,16 +50,16 @@ These opt-in checks need an existing read-only AWS connection. Use
 ```sh
 mise run build
 # The same notebook kernel must reconnect after an idle network interruption:
-mise x uv@0.12.10 -- uv run scripts/check-jupyter-recovery.py \
+mise x -- uv run scripts/check-jupyter-recovery.py \
   --config /path/to/pg-tunnel.json --outage 30 reader
 # A longer interruption must stop the kernel and clean up:
-mise x uv@0.12.10 -- uv run scripts/check-jupyter-recovery.py \
+mise x -- uv run scripts/check-jupyter-recovery.py \
   --config /path/to/pg-tunnel.json --outage 75 --expect-stop reader
 # A query timeout during recovery must return; a fresh connection must work:
-mise x uv@0.12.10 -- uv run scripts/check-jupyter-recovery.py \
+mise x -- uv run scripts/check-jupyter-recovery.py \
   --config /path/to/pg-tunnel.json --outage 30 --active-query reader
 # Suspend only the test process tree, then require recovery (not real OS sleep):
-mise x uv@0.12.10 -- uv run scripts/check-jupyter-recovery.py \
+mise x -- uv run scripts/check-jupyter-recovery.py \
   --config /path/to/pg-tunnel.json --suspend 120 reader
 ```
 
@@ -101,7 +101,8 @@ Use a `v`-prefixed version such as `v0.3.0`. The tag workflow runs checks and cr
 a **draft** release; review the assets and notes before publishing. Manual workflow
 runs build artifacts without publishing.
 
-Publishing updates [the Homebrew tap](https://github.com/vertti/homebrew-tap).
+Publishing updates [the Homebrew tap](https://github.com/vertti/homebrew-tap); to
+retry that step, run `gh workflow run homebrew.yml --ref VERSION`.
 The `release` environment needs `HOMEBREW_TAP_TOKEN` with contents-write access to
-the tap. Dependabot maintains Go and GitHub Actions dependencies; mise tool pins
-are updated separately.
+the tap. Dependabot maintains Go and GitHub Actions dependencies. Tool pins in `mise.toml`
+and the mise `version` in the workflows are updated by hand.
