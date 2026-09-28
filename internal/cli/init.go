@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -44,7 +43,7 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return fmt.Errorf("init is interactive and needs a terminal; without one, write pg-tunnel.json by hand: %w", err)
 	}
 	defer unix.Close(terminal) //nolint:errcheck // This input-only terminal has no buffered output.
-	cfgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	cfgCtx, cancel := context.WithTimeout(ctx, setupTimeout)
 	defer cancel()
 	cfg, err := awsConfig(cfgCtx, &p)
 	if err != nil {
@@ -52,7 +51,7 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	}
 	wizard := setup.Wizard{Input: terminalInput{fd: terminal, done: ctx.Done()}, Output: stderr, Config: cfg, AWSProfile: p.AWSProfile, RootCert: p.RootCert, Path: path}
 	wizard.Verify = func(verifyCtx context.Context, candidate *profile.Profile) error {
-		return execute(verifyCtx, candidate, func(context.Context, []string) error { return nil }, reporter(stderr))
+		return execute(verifyCtx, candidate, verifyOnly, reporter(stderr))
 	}
 	if err = wizard.Run(ctx); err != nil {
 		return fmt.Errorf("initialize connection: %w", err)

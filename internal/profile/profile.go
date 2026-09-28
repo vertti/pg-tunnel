@@ -15,8 +15,13 @@ import (
 	"unicode/utf8"
 )
 
-// AuthSecretsManager selects password authentication from an explicitly chosen secret.
-const AuthSecretsManager = "secrets-manager"
+// Authentication methods; IAM is the default.
+const (
+	AuthIAM            = "iam"
+	AuthSecretsManager = "secrets-manager"
+)
+
+const maxConfigSize = 1 << 20
 
 // Environment classifications; production prints a warning at startup.
 const (
@@ -99,7 +104,7 @@ func readConfig(path string) (configuration, error) {
 	}
 	defer file.Close() //nolint:errcheck // This file is read-only.
 	var config configuration
-	limited := &io.LimitedReader{R: file, N: (1 << 20) + 1}
+	limited := &io.LimitedReader{R: file, N: maxConfigSize + 1}
 	decoder := json.NewDecoder(limited)
 	decoder.DisallowUnknownFields()
 	err = decoder.Decode(&config)
@@ -177,10 +182,6 @@ func (p *Profile) Validate() error {
 }
 
 func (p *Profile) validateText() error {
-	if p.Host != "" && p.RootCert == "" {
-		return errors.New("sslrootcert is required for an explicit host; RDS instance and cluster connections can use automatic certificates")
-	}
-
 	for _, field := range []struct{ name, value string }{
 		{"db_instance", p.DBInstance},
 		{"db_cluster", p.DBCluster},
@@ -222,7 +223,7 @@ func (p *Profile) validateOptions() error {
 	}
 
 	switch p.Auth {
-	case "", "iam":
+	case "", AuthIAM:
 		if p.SecretID != "" {
 			return errors.New("secret_id requires auth=secrets-manager; IAM is the default")
 		}
@@ -245,6 +246,9 @@ func (p *Profile) validateSource() error {
 	}
 	if sources != 1 {
 		return errors.New("set exactly one of db_instance, db_cluster, or host")
+	}
+	if p.Host != "" && p.RootCert == "" {
+		return errors.New("sslrootcert is required for an explicit host; RDS instance and cluster connections can use automatic certificates")
 	}
 	if p.ClusterEndpoint != "" {
 		if p.DBCluster == "" {

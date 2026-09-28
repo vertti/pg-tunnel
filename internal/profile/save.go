@@ -58,7 +58,7 @@ func writeConfig(path string, profiles map[string]Profile) error {
 	if err != nil {
 		return fmt.Errorf("encode configuration: %w", err)
 	}
-	if len(data) >= 1<<20 {
+	if len(data) >= maxConfigSize {
 		return errors.New("updated configuration exceeds the 1 MiB size limit")
 	}
 	if err = atomicfile.Write(path, append(data, '\n')); err != nil {

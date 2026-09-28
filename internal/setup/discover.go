@@ -20,8 +20,10 @@ import (
 	"github.com/vertti/pg-tunnel/internal/awsdb"
 )
 
+const discoveryTimeout = 30 * time.Second
+
 func account(ctx context.Context, cfg *aws.Config) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
 	result, err := sts.NewFromConfig(*cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
@@ -31,7 +33,7 @@ func account(ctx context.Context, cfg *aws.Config) (string, error) {
 }
 
 func databases(ctx context.Context, cfg *aws.Config) ([]rdstypes.DBInstance, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
 	pages := rds.NewDescribeDBInstancesPaginator(rds.NewFromConfig(*cfg), &rds.DescribeDBInstancesInput{})
 	var result []rdstypes.DBInstance
@@ -64,15 +66,14 @@ func onlineNodes(ctx context.Context, cfg *aws.Config) (map[string]bool, error) 
 			return nil, fmt.Errorf("list online SSM nodes; check ssm:DescribeInstanceInformation permission: %w", err)
 		}
 		for i := range page.InstanceInformationList {
-			node := &page.InstanceInformationList[i]
-			result[aws.ToString(node.InstanceId)] = node.PingStatus == ssmtypes.PingStatusOnline
+			result[aws.ToString(page.InstanceInformationList[i].InstanceId)] = true
 		}
 	}
 	return result, nil
 }
 
 func jumpHosts(ctx context.Context, cfg *aws.Config, vpc string) ([]ec2types.Instance, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
 	online, err := onlineNodes(ctx, cfg)
 	if err != nil {
