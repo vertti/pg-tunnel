@@ -24,7 +24,7 @@ to trust them, preventing an untrusted checkout from substituting a database or 
 
 ```sh
 pg-tunnel init --region eu-central-1
-# Or select an AWS profile:
+# Or select an AWS profile; --profile is an alias:
 pg-tunnel init --aws-profile dev
 ```
 

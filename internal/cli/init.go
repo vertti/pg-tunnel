@@ -23,6 +23,7 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	flags.StringVar(&p.RootCert, "sslrootcert", "", "optional custom CA `PEM` file (default: automatically managed AWS RDS bundle)")
 	flags.StringVar(&p.Region, "region", "", "AWS `REGION` (defaults to AWS configuration)")
 	flags.StringVar(&p.AWSProfile, "aws-profile", "", "AWS `PROFILE` to use and save (defaults to current AWS credentials)")
+	flags.StringVar(&p.AWSProfile, "profile", "", "alias for --aws-profile")
 	var path string
 	configFlag(flags, &path, "`PATH` of the destination JSON file (defaults to shared user configuration)")
 	if help, err := parseFlags(flags, args, stdout); help || err != nil {

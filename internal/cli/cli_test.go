@@ -62,10 +62,10 @@ func TestUsageMistakesExplainTheFix(t *testing.T) {
 		{"put -config before the connection name", []string{"run", "dev", "-config", "other.json", "--", "psql"}},
 		{"put --help before the connection name", []string{"connect", "dev", "--help"}},
 		{`unknown command "bogus"`, []string{"help", "bogus"}},
-		{"flag provided but not defined: -profile", []string{"init", "--profile", "dev"}},
 		{"connect takes only a CONNECTION name", []string{"connect", "dev", "extra"}},
 		{"cleanup takes no arguments", []string{"cleanup", "extra"}},
 		{"init takes no arguments", []string{"init", "dev"}},
+		{"init takes no arguments", []string{"init", "--profile", "dev", "extra"}},
 		{`unexpected argument "extra"`, []string{"--version", "extra"}},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
@@ -160,7 +160,7 @@ func TestInitHelpRequiresNeitherTerminalNorAWS(t *testing.T) {
 	require.NoError(t, cli.RunContext(t.Context(), []string{"init", "--help"}, &output, io.Discard))
 	assert.Contains(t, output.String(), "-region")
 	assert.Contains(t, output.String(), "-aws-profile")
-	assert.NotContains(t, output.String(), "\n  -profile string\n")
+	assert.Contains(t, output.String(), "\n  -profile string\n    \talias for --aws-profile\n")
 	assert.Contains(t, output.String(), "-config")
 }
 
