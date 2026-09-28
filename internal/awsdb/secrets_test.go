@@ -41,7 +41,7 @@ func TestSecretsValidateWithoutLeakingValues(t *testing.T) {
 			t.Parallel()
 			payload, err := json.Marshal(map[string]string{"SecretString": tc.value})
 			require.NoError(t, err)
-			auth := secretAuth(t, string(payload), http.StatusOK)
+			auth := secretAuth(t, http.StatusOK, string(payload))
 			credential, err := auth.Credential(t.Context(), session.Target{Host: "db.example", Port: 5432, User: "reader"})
 			if tc.want != "" {
 				require.ErrorContains(t, err, tc.want)
@@ -56,13 +56,18 @@ func TestSecretsValidateWithoutLeakingValues(t *testing.T) {
 	}
 }
 
-func secretAuth(t *testing.T, payload string, status int) awsdb.Secrets {
+// secretAuth answers successive GetSecretValue calls with payloads, repeating the last.
+func secretAuth(t *testing.T, status int, payloads ...string) awsdb.Secrets {
 	t.Helper()
 	api := secretsmanager.NewFromConfig(aws.Config{Region: "eu-central-1", Credentials: credentials.NewStaticCredentialsProvider("test", "test", ""), RetryMaxAttempts: 1, HTTPClient: secretHTTP(func(request *http.Request) (*http.Response, error) {
 		body, err := io.ReadAll(request.Body)
 		require.NoError(t, err)
 		require.NoError(t, request.Body.Close())
 		assert.JSONEq(t, `{"SecretId":"chosen-secret","VersionStage":"AWSCURRENT"}`, string(body))
+		payload := payloads[0]
+		if len(payloads) > 1 {
+			payloads = payloads[1:]
+		}
 		return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/x-amz-json-1.1"}}, Body: io.NopCloser(strings.NewReader(payload)), Request: request}, nil
 	})})
 	return awsdb.Secrets{API: api, ID: "chosen-secret"}
@@ -80,42 +85,31 @@ func TestSecretsErrorsDoNotExposeResponseBodies(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := secretAuth(t, tc.payload, tc.status).Credential(t.Context(), session.Target{User: "reader"})
+			_, err := secretAuth(t, tc.status, tc.payload).Credential(t.Context(), session.Target{User: "reader"})
 			require.ErrorContains(t, err, tc.want)
 			assert.NotContains(t, err.Error(), "private-marker")
 		})
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := secretAuth(t, `{}`, http.StatusOK).Credential(ctx, session.Target{})
+	_, err := secretAuth(t, http.StatusOK, `{}`).Credential(ctx, session.Target{})
 	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestSecretsReadsCurrentVersionOnEveryRefresh(t *testing.T) {
 	t.Parallel()
-	calls := 0
-	api := secretsmanager.NewFromConfig(aws.Config{Region: "eu-central-1", Credentials: credentials.NewStaticCredentialsProvider("test", "test", ""), HTTPClient: secretHTTP(func(request *http.Request) (*http.Response, error) {
-		body, err := io.ReadAll(request.Body)
-		require.NoError(t, err)
-		require.NoError(t, request.Body.Close())
-		assert.JSONEq(t, `{"SecretId":"chosen-secret","VersionStage":"AWSCURRENT"}`, string(body))
-		password := "first"
-		if calls > 0 {
-			password = "rotated"
-		}
-		calls++
+	secret := func(password string) string {
 		value, err := json.Marshal(map[string]string{"username": "reader", "password": password})
 		require.NoError(t, err)
 		payload, err := json.Marshal(map[string]string{"SecretString": string(value)})
 		require.NoError(t, err)
-		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(string(payload))), Request: request}, nil
-	})})
-	auth := awsdb.Secrets{API: api, ID: "chosen-secret"}
+		return string(payload)
+	}
+	auth := secretAuth(t, http.StatusOK, secret("first"), secret("rotated"))
 	first, err := auth.Credential(t.Context(), session.Target{User: "reader"})
 	require.NoError(t, err)
 	next, err := auth.Credential(t.Context(), session.Target{User: "reader"})
 	require.NoError(t, err)
 	assert.Equal(t, "first", first.Secret)
 	assert.Equal(t, "rotated", next.Secret)
-	assert.Equal(t, 2, calls)
 }

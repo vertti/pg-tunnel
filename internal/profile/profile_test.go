@@ -155,7 +155,7 @@ func TestProjectAndExplicitConfigDoNotRequireHome(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestAutomaticCAIsOnlyAvailableForRDSInstances(t *testing.T) {
+func TestAutomaticCAIsUnavailableForExplicitHost(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	content := projectValid

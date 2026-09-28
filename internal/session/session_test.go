@@ -169,12 +169,7 @@ func TestRefreshRetriesAndJoinsBeforeCleanup(t *testing.T) {
 			published = append(published, c.Secret)
 			return nil
 		}
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		runner.Command = func(ctx context.Context, _ []string) error { <-ctx.Done(); return nil }
-		result := make(chan error, 1)
-		go func() { result <- runner.Run(ctx) }()
-		synctest.Wait()
+		stop := runUntilStopped(t, &runner)
 		time.Sleep(12 * time.Minute)
 		synctest.Wait()
 		mu.Lock()
@@ -187,8 +182,7 @@ func TestRefreshRetriesAndJoinsBeforeCleanup(t *testing.T) {
 		mu.Lock()
 		assert.Equal(t, []string{"fresh"}, published)
 		mu.Unlock()
-		cancel()
-		require.NoError(t, <-result)
+		require.NoError(t, stop())
 		assert.Equal(t, []string{"client closed", "tunnel closed"}, *events)
 	})
 }
@@ -208,16 +202,10 @@ func TestShutdownCancelsBlockedRenewal(t *testing.T) {
 			renewalStopped = true
 			return session.Credential{}, ctx.Err()
 		})
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		runner.Command = func(ctx context.Context, _ []string) error { <-ctx.Done(); return nil }
-		result := make(chan error, 1)
-		go func() { result <- runner.Run(ctx) }()
-		synctest.Wait()
+		stop := runUntilStopped(t, &runner)
 		time.Sleep(12 * time.Minute)
 		synctest.Wait()
-		cancel()
-		require.NoError(t, <-result)
+		require.NoError(t, stop())
 		assert.True(t, renewalStopped)
 		assert.Equal(t, []string{"client closed", "tunnel closed"}, *events)
 	})
@@ -235,16 +223,10 @@ func TestCredentialPublicationFailureRetriesWithoutStoppingChild(t *testing.T) {
 			}
 			return nil
 		}
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		runner.Command = func(ctx context.Context, _ []string) error { <-ctx.Done(); return nil }
-		result := make(chan error, 1)
-		go func() { result <- runner.Run(ctx) }()
-		synctest.Wait()
+		stop := runUntilStopped(t, &runner)
 		time.Sleep(12*time.Minute + 5*time.Second)
 		synctest.Wait()
-		cancel()
-		require.NoError(t, <-result)
+		require.NoError(t, stop())
 		assert.Equal(t, 2, attempts)
 	})
 }
@@ -327,12 +309,7 @@ func TestPasswordRotationVerifiesBeforePublishingAndRetainsPreviousOnFailure(t *
 			published = append(published, c.Secret)
 			return nil
 		}
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		runner.Command = func(ctx context.Context, _ []string) error { <-ctx.Done(); return nil }
-		result := make(chan error, 1)
-		go func() { result <- runner.Run(ctx) }()
-		synctest.Wait()
+		stop := runUntilStopped(t, &runner)
 		time.Sleep(5 * time.Minute)
 		synctest.Wait()
 		mu.Lock()
@@ -351,8 +328,7 @@ func TestPasswordRotationVerifiesBeforePublishingAndRetainsPreviousOnFailure(t *
 		mu.Lock()
 		assert.Equal(t, []string{"rotated"}, published)
 		mu.Unlock()
-		cancel()
-		require.NoError(t, <-result)
+		require.NoError(t, stop())
 		assert.Equal(t, []string{"client closed", "tunnel closed"}, *events)
 	})
 }
@@ -379,18 +355,24 @@ func TestNearlyExpiredAWSCredentialsDoNotCauseRapidRenewal(t *testing.T) {
 			calls++
 			return session.Credential{Secret: fmt.Sprintf("token-%d", calls), ExpiresAt: awsExpiry}, nil
 		})
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		runner.Command = func(ctx context.Context, _ []string) error { <-ctx.Done(); return nil }
-		result := make(chan error, 1)
-		go func() { result <- runner.Run(ctx) }()
-		synctest.Wait()
+		stop := runUntilStopped(t, &runner)
 		time.Sleep(time.Minute)
 		synctest.Wait()
 		mu.Lock()
 		assert.Equal(t, 3, calls, "startup plus one renewal every 30 seconds")
 		mu.Unlock()
-		cancel()
-		require.NoError(t, <-result)
+		require.NoError(t, stop())
 	})
+}
+
+// runUntilStopped runs runner with a command that waits for cancellation.
+// stop cancels the session and returns the result of Run.
+func runUntilStopped(t *testing.T, runner *session.Runner) (stop func() error) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	runner.Command = func(ctx context.Context, _ []string) error { <-ctx.Done(); return nil }
+	result := make(chan error, 1)
+	go func() { result <- runner.Run(ctx) }()
+	synctest.Wait()
+	return func() error { cancel(); return <-result }
 }

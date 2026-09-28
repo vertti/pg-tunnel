@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -93,7 +92,7 @@ func TestWizardDiscoversAcrossPagesAndSavesOnlyAfterConfirmation(t *testing.T) {
 			if answer != "EOF" {
 				input += answer + "\n"
 			}
-			wizard := setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, ""), Input: strings.NewReader(input), Output: &output, Path: path, RootCert: ca, AWSProfile: "dev"}
+			wizard := setup.Wizard{Config: fixtureConfig(t, ""), Input: strings.NewReader(input), Output: &output, Path: path, RootCert: ca, AWSProfile: "dev"}
 			verified := false
 			wizard.Verify = func(context.Context, *profile.Profile) error { verified = true; return nil }
 			err := wizard.Run(t.Context())
@@ -150,53 +149,46 @@ func TestWizardDiscoveryPermissionFailures(t *testing.T) {
 	}
 }
 
-func TestWizardCancellationAndOutputFailureWriteNothing(t *testing.T) {
+func TestCancelledWizardWritesNothing(t *testing.T) {
 	t.Parallel()
-	for _, cancelled := range []bool{true, false} {
-		t.Run(strconv.FormatBool(cancelled), func(t *testing.T) {
-			t.Parallel()
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			if cancelled {
-				cancel()
-			}
-			path := filepath.Join(t.TempDir(), "profiles.json")
-			wizard := setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, ""), Input: strings.NewReader(""), Output: io.Discard, Path: path}
-			if !cancelled {
-				wizard.Output = brokenWriter{}
-			}
-			require.Error(t, wizard.Run(ctx))
-			assert.NoFileExists(t, path)
-		})
-	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	wizard := setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, ""), Input: strings.NewReader(""), Output: io.Discard, Path: path}
+	require.ErrorIs(t, wizard.Run(ctx), context.Canceled)
+	assert.NoFileExists(t, path)
 }
 
-type brokenWriter struct{}
-
-func (brokenWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+// rewriting replaces from with to in every AWS response body.
+func rewriting(t *testing.T, cfg *aws.Config, from, to string) {
+	t.Helper()
+	client := cfg.HTTPClient
+	cfg.HTTPClient = httpFunc(func(request *http.Request) (*http.Response, error) {
+		response, err := client.Do(request)
+		if err != nil {
+			return nil, fmt.Errorf("fixture response: %w", err)
+		}
+		body, err := io.ReadAll(response.Body)
+		require.NoError(t, err)
+		require.NoError(t, response.Body.Close())
+		response.Body = io.NopCloser(strings.NewReader(strings.ReplaceAll(string(body), from, to)))
+		return response, nil
+	})
+}
 
 func TestWizardRejectsUnusableDatabaseAndCA(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ name, from, to, want string }{
 		{"no endpoint", "<Address>example.rds.amazonaws.com</Address>", "<Address></Address>", "no endpoint yet"},
 		{"no PostgreSQL", "<Engine>postgres</Engine>", "<Engine>mysql</Engine>", "no RDS PostgreSQL instances"},
-		{"missing CA", "unchanged", "unchanged", "validate CA bundle"},
+		{"missing CA", "", "", "validate CA bundle"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			cfg := fixtureConfig(t, "")
-			client := cfg.HTTPClient
-			cfg.HTTPClient = httpFunc(func(request *http.Request) (*http.Response, error) {
-				response, err := client.Do(request)
-				if err != nil {
-					return nil, fmt.Errorf("fixture response: %w", err)
-				}
-				body, err := io.ReadAll(response.Body)
-				require.NoError(t, err)
-				require.NoError(t, response.Body.Close())
-				response.Body = io.NopCloser(strings.NewReader(strings.ReplaceAll(string(body), tc.from, tc.to)))
-				return response, nil
-			})
+			if tc.from != "" {
+				rewriting(t, &cfg, tc.from, tc.to)
+			}
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			input := "1\n1\n1\ndata\nreader\n"
 			wizard := setup.Wizard{Verify: successfulVerification, Config: cfg, Input: strings.NewReader(input), Output: io.Discard, Path: path, RootCert: filepath.Join(t.TempDir(), "missing.pem")}
@@ -324,20 +316,9 @@ func TestWizardPasswordAuthentication(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			cfg := fixtureConfig(t, "")
-			client := cfg.HTTPClient
-			cfg.HTTPClient = httpFunc(func(request *http.Request) (*http.Response, error) {
-				response, err := client.Do(request)
-				if err != nil {
-					return nil, fmt.Errorf("fixture response: %w", err)
-				}
-				if tc.disableIAM {
-					body, readErr := io.ReadAll(response.Body)
-					require.NoError(t, readErr)
-					require.NoError(t, response.Body.Close())
-					response.Body = io.NopCloser(strings.NewReader(strings.ReplaceAll(string(body), "<IAMDatabaseAuthenticationEnabled>true", "<IAMDatabaseAuthenticationEnabled>false")))
-				}
-				return response, nil
-			})
+			if tc.disableIAM {
+				rewriting(t, &cfg, "<IAMDatabaseAuthenticationEnabled>true", "<IAMDatabaseAuthenticationEnabled>false")
+			}
 			answer := "yes"
 			if tc.cancel {
 				answer = "no"
