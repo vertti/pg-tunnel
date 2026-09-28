@@ -2,7 +2,6 @@ package libpq_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,14 +17,7 @@ import (
 )
 
 func TestPgxPoolExampleWithPostgres(t *testing.T) {
-	initdb, err := exec.LookPath("initdb")
-	if err != nil {
-		if os.Getenv("CI") != "" {
-			t.Fatal("initdb must be on PATH in CI for client compatibility tests")
-		}
-		t.Skip("install PostgreSQL and put initdb on PATH to test client compatibility")
-	}
-	target, port := startPostgres(t, initdb)
+	target, port := startPostgres(t, requireInitdb(t))
 	files := libpq.Files{Root: filepath.Join(t.TempDir(), "sessions")}
 	first, err := files.Prepare(target, port, session.Credential{Secret: postgresPassword})
 	require.NoError(t, err)

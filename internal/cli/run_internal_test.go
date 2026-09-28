@@ -3,10 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
-	"encoding/pem"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +17,7 @@ import (
 
 	"github.com/vertti/pg-tunnel/internal/awsdb"
 	"github.com/vertti/pg-tunnel/internal/profile"
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 func TestConnectReportsOnlyClientSettingsUntilStopped(t *testing.T) {
@@ -121,16 +119,10 @@ func TestSessionStopsAtFirstFailedStage(t *testing.T) {
 	t.Setenv("AWS_ENDPOINT_URL", "http://127.0.0.1:1")
 	t.Setenv("AWS_MAX_ATTEMPTS", "1")
 	directory := t.TempDir()
-	ca := testCA(t)
+	ca := testutil.CA(t)
 	invalidCA := filepath.Join(directory, "invalid.pem")
 	require.NoError(t, os.WriteFile(invalidCA, []byte("not a certificate"), 0o600))
-	cache, err := os.UserCacheDir()
-	require.NoError(t, err)
-	managed := filepath.Join(cache, "pg-tunnel", "certificates", "aws.pem")
-	require.NoError(t, os.MkdirAll(filepath.Dir(managed), 0o700))
-	data, err := os.ReadFile(ca) //nolint:gosec // The path is inside the test's temporary directory.
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(managed, data, 0o600)) //nolint:gosec // The path is inside the test's temporary directory.
+	testutil.SeedRDSCA(t, ca)
 
 	base := profile.Profile{Database: "data", User: "reader", Target: "i-example", Region: "eu-central-1", Port: 5432}
 	for _, tc := range []struct {
@@ -186,21 +178,10 @@ func TestCleanupRemovesAbandonedSessions(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
-func testCA(t *testing.T) string {
-	t.Helper()
-	server := httptest.NewTLSServer(http.NotFoundHandler())
-	t.Cleanup(server.Close)
-	path := filepath.Join(t.TempDir(), "ca.pem")
-	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0o600))
-	return path
-}
-
 // isolateAWS keeps the developer's AWS configuration, credentials, and caches out of a test.
 func isolateAWS(t *testing.T) {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CACHE_HOME", home+"/cache")
+	home := testutil.IsolateHome(t)
 	t.Setenv("AWS_CONFIG_FILE", home+"/aws-config")
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", home+"/aws-credentials")
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")

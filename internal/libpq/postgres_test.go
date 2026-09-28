@@ -5,8 +5,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,19 +18,13 @@ import (
 
 	"github.com/vertti/pg-tunnel/internal/libpq"
 	"github.com/vertti/pg-tunnel/internal/session"
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 const postgresPassword = "test-postgres-password" //nolint:gosec // A disposable local test database credential.
 
 func TestVerifySCRAMWithPostgresAndIgnoresAmbientSettings(t *testing.T) {
-	initdb, err := exec.LookPath("initdb")
-	if err != nil {
-		if os.Getenv("CI") != "" {
-			t.Fatal("initdb must be on PATH in CI for the PostgreSQL authentication test")
-		}
-		t.Skip("install PostgreSQL and put initdb on PATH to run the SCRAM integration test")
-	}
-	target, port := startPostgres(t, initdb)
+	target, port := startPostgres(t, requireInitdb(t))
 	for key, value := range map[string]string{
 		"PGSERVICE": "unrelated", "PGSERVICEFILE": "/nonexistent/service", "PGHOST": "wrong.example",
 		"PGPORT": "invalid", "PGUSER": "wrong", "PGDATABASE": "wrong", "PGPASSWORD": "wrong",
@@ -44,7 +36,7 @@ func TestVerifySCRAMWithPostgresAndIgnoresAmbientSettings(t *testing.T) {
 		t.Setenv(key, value)
 	}
 	require.NoError(t, libpq.Verify(t.Context(), target, port, session.Credential{Secret: postgresPassword}, nil))
-	err = libpq.Verify(t.Context(), target, port, session.Credential{Secret: "rejected-password"}, nil)
+	err := libpq.Verify(t.Context(), target, port, session.Credential{Secret: "rejected-password"}, nil)
 	require.ErrorContains(t, err, "TLS/database connection failed")
 	assert.NotContains(t, err.Error(), "rejected-password")
 	var warnings []string
@@ -59,18 +51,27 @@ func TestVerifySCRAMWithPostgresAndIgnoresAmbientSettings(t *testing.T) {
 	require.ErrorContains(t, err, "require_auth")
 }
 
+func requireInitdb(t *testing.T) string {
+	t.Helper()
+	initdb, err := exec.LookPath("initdb")
+	if err == nil {
+		return initdb
+	}
+	if os.Getenv("CI") != "" {
+		t.Fatal("initdb must be on PATH in CI for the PostgreSQL integration tests")
+	}
+	t.Skip("install PostgreSQL and put initdb on PATH to run the PostgreSQL integration tests")
+	return ""
+}
+
 func startPostgres(t *testing.T, initdb string) (target session.Target, port int) {
 	t.Helper()
 	dir := t.TempDir()
 	database := filepath.Join(dir, "data")
-	certServer := httptest.NewTLSServer(http.NotFoundHandler())
-	certServer.Close()
-	cert := certServer.Certificate()
-	ca := filepath.Join(dir, "server.crt")
+	ca, certServer := testutil.TLSServerCA(t)
 	key := filepath.Join(dir, "server.key")
 	privateKey, err := x509.MarshalPKCS8PrivateKey(certServer.TLS.Certificates[0].PrivateKey)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0o600))
 	require.NoError(t, os.WriteFile(key, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKey}), 0o600))
 	passwordFile := filepath.Join(dir, "password")
 	require.NoError(t, os.WriteFile(passwordFile, []byte(postgresPassword+"\n"), 0o600))
@@ -99,7 +100,7 @@ func startPostgres(t *testing.T, initdb string) (target session.Target, port int
 		assert.NoError(t, stopErr, "%s", output)
 	})
 	runPostgresTool(t, pgctl, "-D", database, "-l", filepath.Join(dir, "postgres.log"), "-w", "-t", "10", "-o", options, "start")
-	return session.Target{Host: cert.DNSNames[0], Port: port, Database: "postgres", User: "postgres", RootCert: ca}, port
+	return session.Target{Host: certServer.Certificate().DNSNames[0], Port: port, Database: "postgres", User: "postgres", RootCert: ca}, port
 }
 
 func runPostgresTool(t *testing.T, program string, args ...string) {
@@ -112,10 +113,7 @@ func runPostgresTool(t *testing.T, program string, args ...string) {
 
 func TestPrivilegeWarningsForRoleMembershipAndRestrictedCatalogs(t *testing.T) {
 	t.Parallel()
-	initdb, err := exec.LookPath("initdb")
-	if err != nil {
-		t.Skip("PostgreSQL is not installed")
-	}
+	initdb := requireInitdb(t)
 	target, port := startPostgres(t, initdb)
 	credential := session.Credential{Secret: postgresPassword}
 	client, err := (libpq.Files{Root: filepath.Join(t.TempDir(), "sessions")}).Prepare(target, port, credential)

@@ -24,6 +24,8 @@ import (
 	"github.com/aws/smithy-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 func TestResumeSurvivesThirtySecondOutage(t *testing.T) {
@@ -128,10 +130,7 @@ func TestRecoveryCallbackReplacesUpstreamRetryHandler(t *testing.T) {
 
 func TestRejectedResumeExitsChild(t *testing.T) {
 	t.Parallel()
-	executable, err := os.Executable()
-	require.NoError(t, err)
-	child := exec.CommandContext(t.Context(), executable, "-test.run=^TestRecoveryChild$") //nolint:gosec // Execute this test binary as the isolated plugin process.
-	child.Env = append(os.Environ(), "PG_TUNNEL_RECOVERY_CHILD=1")
+	child := testutil.SelfCommand(t, "TestRecoveryChild", "PG_TUNNEL_RECOVERY_CHILD=1")
 	output, err := child.CombinedOutput()
 	var exit *exec.ExitError
 	require.ErrorAs(t, err, &exit)

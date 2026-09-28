@@ -20,6 +20,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
 func testCA(t *testing.T, expires time.Time) []byte {
@@ -153,9 +155,7 @@ func TestRDSCASources(t *testing.T) {
 }
 
 func TestRDSCAUsesFreshUserCacheWithoutNetwork(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	testutil.IsolateHome(t)
 	cache, err := os.UserCacheDir()
 	require.NoError(t, err)
 	for region, name := range map[string]string{"eu-central-1": "aws.pem", "cn-north-1": "aws-cn.pem", "us-gov-west-1": "aws-us-gov.pem"} {
