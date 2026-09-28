@@ -19,8 +19,8 @@ import (
 // Files creates isolated libpq settings in a directory owned by the current user.
 type Files struct{ Root string }
 
-// Client holds an advisory lock until credential cleanup finishes.
-type Client struct {
+// client holds an advisory lock until credential cleanup finishes.
+type client struct {
 	err    error
 	lock   *os.File
 	dir    string
@@ -47,14 +47,14 @@ func (f Files) Prepare(target session.Target, port int, credential session.Crede
 	if err != nil {
 		return nil, errors.Join(err, os.RemoveAll(dir))
 	}
-	client := &Client{target: target, port: port, dir: dir, lock: lock}
-	if err = client.initialize(credential); err != nil {
-		return nil, errors.Join(err, client.Close())
+	c := &client{target: target, port: port, dir: dir, lock: lock}
+	if err = c.initialize(credential); err != nil {
+		return nil, errors.Join(err, c.Close())
 	}
-	return client, nil
+	return c, nil
 }
 
-func (c *Client) initialize(credential session.Credential) error {
+func (c *client) initialize(credential session.Credential) error {
 	for _, value := range []string{c.target.Host, c.target.Database, c.target.User, c.target.RootCert} {
 		if strings.ContainsAny(value, "\r\n\x00") || strings.TrimSpace(value) != value {
 			return errors.New("connection settings cannot contain line breaks, NULs, or surrounding whitespace")
@@ -68,7 +68,7 @@ func (c *Client) initialize(credential session.Credential) error {
 }
 
 // Update replaces the password file without exposing an incomplete credential.
-func (c *Client) Update(credential session.Credential) error {
+func (c *client) Update(credential session.Credential) error {
 	if credential.Secret == "" || strings.ContainsAny(credential.Secret, "\r\n\x00") {
 		return errors.New("credential is empty or contains unsupported control characters")
 	}
@@ -81,7 +81,7 @@ func (c *Client) Update(credential session.Credential) error {
 }
 
 // Env replaces inherited libpq settings while leaving unrelated variables alone.
-func (c *Client) Env(base []string) []string {
+func (c *client) Env(base []string) []string {
 	env := make([]string, 0, len(base)+3)
 	for _, entry := range base {
 		if !strings.HasPrefix(entry, "PG") {
@@ -92,7 +92,7 @@ func (c *Client) Env(base []string) []string {
 }
 
 // Close removes credentials before releasing ownership and is safe to repeat.
-func (c *Client) Close() error {
+func (c *client) Close() error {
 	c.once.Do(func() { c.err = errors.Join(os.RemoveAll(c.dir), c.lock.Close()) })
 	if c.err != nil {
 		return fmt.Errorf("remove private client settings: %w", c.err)

@@ -261,12 +261,29 @@ func TestIAMReportsCredentialExpiryKnowledge(t *testing.T) {
 			value.AccessKeyID, value.SecretAccessKey = "test", "test"
 			var reported []string
 			auth := awsdb.IAM{Region: "eu-central-1", Report: func(message string) { reported = append(reported, message) }, Provider: providerFunc(func(context.Context) (aws.Credentials, error) { return value, nil })}
-			_, err := auth.Credential(t.Context(), session.Target{Host: "db.example", Port: 5432, User: "reader"})
-			require.NoError(t, err)
-			require.Len(t, reported, 1)
+			for range 2 {
+				_, err := auth.Credential(t.Context(), session.Target{Host: "db.example", Port: 5432, User: "reader"})
+				require.NoError(t, err)
+			}
+			require.Len(t, reported, 1, "renewals with the same AWS credentials report once")
 			assert.Contains(t, reported[0], tc.want)
 		})
 	}
+}
+
+func TestIAMReportsRenewedAWSCredentials(t *testing.T) {
+	t.Parallel()
+	expiry := time.Now().Add(time.Hour).Truncate(time.Second)
+	var reported []string
+	auth := awsdb.IAM{Region: "eu-central-1", Report: func(message string) { reported = append(reported, message) }, Provider: providerFunc(func(context.Context) (aws.Credentials, error) {
+		expiry = expiry.Add(time.Hour)
+		return aws.Credentials{AccessKeyID: "test", SecretAccessKey: "test", CanExpire: true, Expires: expiry}, nil
+	})}
+	for range 2 {
+		_, err := auth.Credential(t.Context(), session.Target{Host: "db.example", Port: 5432, User: "reader"})
+		require.NoError(t, err)
+	}
+	assert.Len(t, reported, 2)
 }
 
 func TestAuroraPostgreSQLInstancesAreSupported(t *testing.T) {

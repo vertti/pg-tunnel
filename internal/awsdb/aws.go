@@ -72,6 +72,33 @@ func (r *Resolver) resolveInstance(ctx context.Context, target session.Target) (
 	return target, nil
 }
 
+func (r *Resolver) resolveCluster(ctx context.Context, target session.Target) (session.Target, error) {
+	output, err := r.API.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(r.Profile.DBCluster)})
+	if err != nil {
+		return target, fmt.Errorf("RDS DescribeDBClusters for %q (check region, AWS profile, and rds:DescribeDBClusters permission): %w", r.Profile.DBCluster, err)
+	}
+	if len(output.DBClusters) != 1 {
+		return target, fmt.Errorf("expected one Aurora cluster, found %d", len(output.DBClusters))
+	}
+	db := output.DBClusters[0]
+	if aws.ToString(db.Engine) != "aurora-postgresql" {
+		return target, errors.New("db_cluster supports only Aurora PostgreSQL; use db_instance or an explicit host for other PostgreSQL endpoints")
+	}
+	if r.Profile.Auth != profile.AuthSecretsManager && !aws.ToBool(db.IAMDatabaseAuthenticationEnabled) {
+		return target, errors.New("IAM database authentication is disabled on this Aurora cluster")
+	}
+	endpoint, kind := aws.ToString(db.Endpoint), profile.ClusterWriter
+	if r.Profile.ClusterEndpoint == profile.ClusterReader {
+		endpoint, kind = aws.ToString(db.ReaderEndpoint), profile.ClusterReader
+	}
+	port := int(aws.ToInt32(db.Port))
+	if endpoint == "" || port < 1 || port > 65535 {
+		return target, fmt.Errorf("RDS did not return a usable %s endpoint and port", kind)
+	}
+	target.Host, target.Port = endpoint, port
+	return target, nil
+}
+
 // PostgreSQLEngine reports whether an RDS engine name is PostgreSQL.
 func PostgreSQLEngine(engine string) bool {
 	return engine == "postgres" || engine == "aurora-postgresql"
@@ -111,10 +138,11 @@ type IAM struct {
 	Provider          aws.CredentialsProvider
 	Report            func(string)
 	Region            string
+	reported          string
 }
 
 // Credential generates a token and conservatively bounds its usable lifetime.
-func (a IAM) Credential(ctx context.Context, target session.Target) (session.Credential, error) {
+func (a *IAM) Credential(ctx context.Context, target session.Target) (session.Credential, error) {
 	value, err := a.Provider.Retrieve(ctx)
 	if err != nil {
 		return session.Credential{}, fmt.Errorf("load AWS credentials; renew your AWS profile or SSO login: %w", err)
@@ -133,8 +161,9 @@ func (a IAM) Credential(ctx context.Context, target session.Target) (session.Cre
 	if time.Until(expiry) < time.Minute {
 		return session.Credential{}, errors.New("AWS credentials expire in less than one minute; renew the AWS session (for aws-vault, use exec --server)")
 	}
-	if a.Report != nil {
-		a.Report(credentialStatus(&value, awsExpiry))
+	if status := credentialStatus(&value, awsExpiry); a.Report != nil && status != a.reported {
+		a.reported = status
+		a.Report(status)
 	}
 	provider := credentials.NewStaticCredentialsProvider(value.AccessKeyID, value.SecretAccessKey, value.SessionToken)
 	secret, err := auth.BuildAuthToken(ctx, net.JoinHostPort(target.Host, strconv.Itoa(target.Port)), a.Region, target.User, provider)
@@ -152,31 +181,4 @@ func credentialStatus(value *aws.Credentials, expiry time.Time) string {
 		return "AWS temporary credential expiry is unknown; static environment credentials cannot be renewed. Use a refreshable AWS profile or aws-vault exec --server."
 	}
 	return "AWS credential expiry is not reported by the provider."
-}
-
-func (r *Resolver) resolveCluster(ctx context.Context, target session.Target) (session.Target, error) {
-	output, err := r.API.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(r.Profile.DBCluster)})
-	if err != nil {
-		return target, fmt.Errorf("RDS DescribeDBClusters for %q (check region, AWS profile, and rds:DescribeDBClusters permission): %w", r.Profile.DBCluster, err)
-	}
-	if len(output.DBClusters) != 1 {
-		return target, fmt.Errorf("expected one Aurora cluster, found %d", len(output.DBClusters))
-	}
-	db := output.DBClusters[0]
-	if aws.ToString(db.Engine) != "aurora-postgresql" {
-		return target, errors.New("db_cluster supports only Aurora PostgreSQL; use db_instance or an explicit host for other PostgreSQL endpoints")
-	}
-	if r.Profile.Auth != profile.AuthSecretsManager && !aws.ToBool(db.IAMDatabaseAuthenticationEnabled) {
-		return target, errors.New("IAM database authentication is disabled on this Aurora cluster")
-	}
-	endpoint, kind := aws.ToString(db.Endpoint), profile.ClusterWriter
-	if r.Profile.ClusterEndpoint == profile.ClusterReader {
-		endpoint, kind = aws.ToString(db.ReaderEndpoint), profile.ClusterReader
-	}
-	port := int(aws.ToInt32(db.Port))
-	if endpoint == "" || port < 1 || port > 65535 {
-		return target, fmt.Errorf("RDS did not return a usable %s endpoint and port", kind)
-	}
-	target.Host, target.Port = endpoint, port
-	return target, nil
 }

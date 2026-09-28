@@ -76,7 +76,7 @@ func TestDatabaseAuthSelectsConfiguredMode(t *testing.T) {
 
 	auth, err = databaseAuth(&profile.Profile{}, &cfg, nil)
 	require.NoError(t, err)
-	iam, ok := auth.(awsdb.IAM)
+	iam, ok := auth.(*awsdb.IAM)
 	require.True(t, ok)
 	assert.Equal(t, "eu-central-1", iam.Region)
 
