@@ -24,7 +24,7 @@ to trust them, preventing an untrusted checkout from substituting a database or 
 
 ```sh
 pg-tunnel init --region eu-central-1
-# Or select an AWS profile; --profile is an alias:
+# Or select an AWS profile:
 pg-tunnel init --aws-profile dev
 ```
 
@@ -34,7 +34,8 @@ uses the standard AWS credential sources and saves your selected AWS profile.
 The wizard finds RDS databases and SSM jump hosts, then asks for your database
 name, user and authentication method. It tests TLS and database access before
 saving. Add `--config pg-tunnel.json` to save in the project instead of your user
-config. Existing connection names are not overwritten.
+config, or `--sslrootcert PEM` to use your own CA instead of the managed RDS bundle.
+Existing connection names are not overwritten.
 
 | Setting | Meaning |
 | --- | --- |

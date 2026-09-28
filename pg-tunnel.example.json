@@ -6,7 +6,7 @@
       "user": "my_reader",
       "jump_tag": "my-database-jump-host",
       "region": "eu-central-1",
-      "aws_profile": "development"
+      "aws_profile": "my-aws-profile"
     }
   }
 }

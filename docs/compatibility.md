@@ -18,7 +18,7 @@ password files; it does not set `PGPASSWORD` or rewrite `DATABASE_URL`.
 
 These results cover macOS arm64 and a Linux arm64 container on Docker Desktop.
 Linux hosts, editor-managed devcontainers and unlisted clients have not been
-verified. Explicit connection strings can override the inherited settings.
+verified.
 
 ## Database endpoints
 
@@ -28,8 +28,7 @@ verified. Explicit connection strings can override the inherited settings.
 | Aurora PostgreSQL instance | `db_instance` | Automated tests only; live login not verified. |
 | Aurora cluster writer / reader | `db_cluster`, `cluster_endpoint` | Automated tests only; live login and failover not verified. |
 
-Cluster selection requires [manual configuration](usage.md#aurora-cluster-endpoints)
-and is not included in v0.2.1.
+Cluster selection requires [manual configuration](usage.md#aurora-cluster-endpoints).
 
 ## Go pgx pools
 

@@ -22,7 +22,7 @@ jobs:
     name: Create draft release
     if: github.ref_type == 'tag'
     needs: packages
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write # Create the draft release and upload verified archives.
       id-token: write # Sign build provenance.

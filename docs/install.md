@@ -12,9 +12,7 @@ The quickest install is `brew install vertti/tap/pg-tunnel` or
 | Linux, ARM64 | `pg-tunnel_linux_arm64.tar.xz` |
 | Linux, x86-64 | `pg-tunnel_linux_amd64.tar.xz` |
 
-
-Download your archive and `checksums.txt` from the same release. For example,
-on Apple Silicon, run in the download directory:
+For example, on Apple Silicon, run in the download directory:
 
 ```sh
 grep ' pg-tunnel_darwin_arm64.tar.xz$' checksums.txt | shasum -a 256 -c -
@@ -23,7 +21,7 @@ mkdir -p ~/.local/bin
 install -m 755 pg-tunnel ~/.local/bin/pg-tunnel
 ```
 
-Releases after v0.2.1 also carry build provenance:
+Releases from v0.3.0 carry build provenance:
 `gh attestation verify pg-tunnel_darwin_arm64.tar.xz --repo vertti/pg-tunnel`.
 
 Keep the extracted licenses/notices with your installation. Add `~/.local/bin`

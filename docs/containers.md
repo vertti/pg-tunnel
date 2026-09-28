@@ -23,13 +23,16 @@ For a local Docker daemon, mount a temporary AWS Vault export read-only.
 Database tokens renew until the exported AWS credentials expire; then restart
 with a fresh export. Credentials stay out of the image and Docker's environment.
 
-From a pg-tunnel checkout, build a Linux binary and a client image with HTTPS
-trust certificates (the base PostgreSQL image does not include them):
+In the directory holding your `pg-tunnel.json`, download the Linux binary for
+Docker's architecture and build a client image with HTTPS trust certificates (the
+base PostgreSQL image does not include them):
 
 ```sh
-mise x -- env GOOS=linux GOARCH="$(docker version --format '{{.Server.Arch}}')" \
-  CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
-  -o bin/pg-tunnel-linux ./cmd/pg-tunnel
+archive="pg-tunnel_linux_$(docker version --format '{{.Server.Arch}}').tar.xz"
+release=https://github.com/vertti/pg-tunnel/releases/latest/download
+curl -fsSLO "$release/$archive" -O "$release/checksums.txt"
+grep " $archive\$" checksums.txt | shasum -a 256 -c -
+mkdir -p bin && tar -xf "$archive" -O pg-tunnel > bin/pg-tunnel-linux && chmod 755 bin/pg-tunnel-linux
 
 docker build -t pg-tunnel-client - <<'DOCKERFILE'
 FROM postgres:18.6
