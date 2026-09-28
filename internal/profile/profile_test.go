@@ -207,7 +207,28 @@ func TestPasswordFileWildcardsAreRejected(t *testing.T) {
 	} {
 		p := base
 		edit(&p)
-		require.ErrorContains(t, p.Validate(), "wildcards", name)
+		err := p.Validate()
+		require.Error(t, err, name)
+		assert.True(t, strings.HasPrefix(err.Error(), name+" "), err.Error())
+	}
+}
+
+func TestValidationNamesTheField(t *testing.T) {
+	t.Parallel()
+	base := profile.Profile{DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432}
+	for want, edit := range map[string]func(*profile.Profile){
+		"user must be UTF-8 without control characters or surrounding whitespace":   func(p *profile.Profile) { p.User = "reader " },
+		"region must be UTF-8 without control characters or surrounding whitespace": func(p *profile.Profile) { p.Region = "eu-central-1\n" },
+		"database is required":                                 func(p *profile.Profile) { p.Database = "" },
+		"user is required":                                     func(p *profile.Profile) { p.User = "" },
+		"port must be 1–65535":                                 func(p *profile.Profile) { p.Port = 70000 },
+		"local_port must be 0–65535":                           func(p *profile.Profile) { p.LocalPort = -1 },
+		"database cannot contain the password-file wildcard *": func(p *profile.Profile) { p.Database = "a*" },
+		"host must be a single DNS name":                       func(p *profile.Profile) { p.DBInstance, p.Host, p.RootCert = "", "db.example:5432", "ca.pem" },
+	} {
+		p := base
+		edit(&p)
+		require.ErrorContains(t, p.Validate(), want)
 	}
 }
 

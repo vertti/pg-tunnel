@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"runtime/debug"
+	"strings"
 )
 
 // ErrUsage marks command-line mistakes, which exit with status 2.
@@ -41,15 +42,15 @@ Run "pg-tunnel COMMAND --help" for the options of a command.
 Options:
 `
 
-func usageError(format string, args ...any) error {
-	return usageErr(fmt.Sprintf(format, args...) + " (see pg-tunnel --help)")
+func usageError(command, format string, args ...any) error {
+	return usageErr(fmt.Sprintf(format, args...) + " (see " + strings.TrimSpace("pg-tunnel "+command) + " --help)")
 }
 
 // RunContext executes commands until completion or cancellation. Requested help,
 // the version, and connect's client settings go to stdout; everything else to stderr.
 func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return usageError("missing command")
+		return usageError("", "missing command")
 	}
 	switch args[0] {
 	case "run", "connect", "check":
@@ -59,10 +60,13 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	case "cleanup":
 		return cleanupCommand(args[1:], stdout, stderr)
 	case "help":
+		if len(args) > 1 {
+			return RunContext(ctx, []string{args[1], "--help"}, stdout, stderr)
+		}
 		return rootOptions([]string{"--help"}, stdout)
 	}
-	if args[0] == "" || args[0][0] != '-' {
-		return usageError("unknown command %q", args[0])
+	if !strings.HasPrefix(args[0], "-") {
+		return usageError("", "unknown command %q", args[0])
 	}
 	return rootOptions(args, stdout)
 }
@@ -80,11 +84,7 @@ func parseFlags(flags *flag.FlagSet, args []string, stdout io.Writer) (help bool
 		return true, nil
 	}
 	if err != nil {
-		command := "pg-tunnel " + flags.Name()
-		if flags.Name() == "pg-tunnel" {
-			command = "pg-tunnel"
-		}
-		return false, usageErr(fmt.Sprintf("%v (see %s --help)", err, command))
+		return false, usageError(strings.TrimPrefix(flags.Name(), "pg-tunnel"), "%v", err)
 	}
 	return false, nil
 }
@@ -101,10 +101,10 @@ func rootOptions(args []string, stdout io.Writer) error {
 		return err
 	}
 	if flags.NArg() > 0 {
-		return usageError("unexpected argument %q", flags.Arg(0))
+		return usageError("", "unexpected argument %q", flags.Arg(0))
 	}
 	if !*version {
-		return usageError("missing command")
+		return usageError("", "missing command")
 	}
 
 	info, _ := debug.ReadBuildInfo()

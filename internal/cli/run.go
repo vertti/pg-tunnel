@@ -35,13 +35,7 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 		flags.PrintDefaults()
 	}
 	var path string
-	flags.Func("config", "configuration file (JSON); default: project pg-tunnel.json, then user configuration", func(value string) error {
-		if value == "" {
-			return errors.New("--config requires a non-empty path")
-		}
-		path = value
-		return nil
-	})
+	configFlag(flags, &path, "`PATH` of the JSON configuration; default: project pg-tunnel.json, then user configuration")
 	if help, err := parseFlags(flags, args, stdout); help || err != nil {
 		return err
 	}
@@ -56,7 +50,7 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 	}
 	p, err := profile.Load(path, name)
 	if err != nil {
-		return fmt.Errorf("load connection: %w", err)
+		return err //nolint:wrapcheck // Load errors already name the file and connection.
 	}
 	if mode == "check" {
 		return checkConnection(ctx, &p, stderr)
@@ -87,27 +81,38 @@ var sessionSyntax = map[string]string{
 	"check":   "check [--config PATH] CONNECTION",
 }
 
+func configFlag(flags *flag.FlagSet, path *string, usage string) {
+	flags.Func("config", usage, func(value string) error {
+		if value == "" {
+			return errors.New("--config requires a non-empty path")
+		}
+		*path = value
+		return nil
+	})
+}
+
 func sessionArguments(mode string, args []string) (name string, command []string, err error) {
 	if len(args) == 0 {
-		return "", nil, usageError("%s needs a CONNECTION name: pg-tunnel %s", mode, sessionSyntax[mode])
+		return "", nil, usageError(mode, "%s needs a CONNECTION name: pg-tunnel %s", mode, sessionSyntax[mode])
 	}
 	name, rest := args[0], args[1:]
-	if len(rest) > 0 && strings.HasPrefix(rest[0], "--config") {
-		return "", nil, usageError("put --config before the connection name")
+	if len(rest) > 0 && strings.HasPrefix(rest[0], "-") && rest[0] != "--" {
+		option, _, _ := strings.Cut(rest[0], "=")
+		return "", nil, usageError(mode, "put %s before the connection name", option)
 	}
 	if mode != "run" {
 		if len(rest) > 0 {
-			return "", nil, usageError("%s takes only a CONNECTION name", mode)
+			return "", nil, usageError(mode, "%s takes only a CONNECTION name", mode)
 		}
 		return name, nil, nil
 	}
 	switch {
 	case len(rest) == 0:
-		return "", nil, usageError("run needs a command: pg-tunnel run %s -- psql", name)
+		return "", nil, usageError(mode, "run needs a command: pg-tunnel run %s -- psql", name)
 	case rest[0] != "--":
-		return "", nil, usageError("put -- between the connection name and the command: pg-tunnel run %s -- %s", name, strings.Join(rest, " "))
+		return "", nil, usageError(mode, "put -- between the connection name and the command: pg-tunnel run %s -- %s", name, strings.Join(rest, " "))
 	case len(rest) == 1:
-		return "", nil, usageError("missing command after --")
+		return "", nil, usageError(mode, "missing command after --")
 	}
 	return name, rest[1:], nil
 }
@@ -254,7 +259,7 @@ func cleanupCommand(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return usageError("cleanup takes no arguments")
+		return usageError("cleanup", "cleanup takes no arguments")
 	}
 	return cleanup(stderr)
 }

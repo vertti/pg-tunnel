@@ -158,11 +158,17 @@ func (p *Profile) Validate() error {
 	if (p.Target == "") == (p.JumpTag == "") {
 		return errors.New("set exactly one of target (SSM instance ID) or jump_tag (EC2 Name tag)")
 	}
-	if p.Database == "" || p.User == "" {
-		return errors.New("database and user are required")
+	if p.Database == "" {
+		return errors.New("database is required")
 	}
-	if p.LocalPort < 0 || p.LocalPort > 65535 || p.Port < 1 || p.Port > 65535 {
-		return errors.New("port must be 1–65535; local_port must be 0–65535 (0 selects an available port)")
+	if p.User == "" {
+		return errors.New("user is required")
+	}
+	if p.Port < 1 || p.Port > 65535 {
+		return errors.New("port must be 1–65535")
+	}
+	if p.LocalPort < 0 || p.LocalPort > 65535 {
+		return errors.New("local_port must be 0–65535 (0 selects an available port)")
 	}
 	if err := p.validateOptions(); err != nil {
 		return err
@@ -175,13 +181,30 @@ func (p *Profile) validateText() error {
 		return errors.New("sslrootcert is required for an explicit host; RDS instance and cluster connections can use automatic certificates")
 	}
 
-	for _, value := range []string{p.DBInstance, p.DBCluster, p.Host, p.Database, p.User, p.Target, p.JumpTag, p.Region, p.AWSProfile, p.RootCert, p.SecretID} {
-		if !plainText(value) {
-			return errors.New("connection values must be UTF-8 without control characters or surrounding whitespace")
+	for _, field := range []struct{ name, value string }{
+		{"db_instance", p.DBInstance},
+		{"db_cluster", p.DBCluster},
+		{"host", p.Host},
+		{"database", p.Database},
+		{"user", p.User},
+		{"target", p.Target},
+		{"jump_tag", p.JumpTag},
+		{"region", p.Region},
+		{"aws_profile", p.AWSProfile},
+		{"sslrootcert", p.RootCert},
+		{"secret_id", p.SecretID},
+	} {
+		if !plainText(field.value) {
+			return fmt.Errorf("%s must be UTF-8 without control characters or surrounding whitespace", field.name)
 		}
 	}
-	if strings.ContainsAny(p.Host, "/:, \\*") || strings.ContainsAny(p.Database, "*") || strings.ContainsAny(p.User, "*") {
-		return errors.New("host must be a single DNS name; database and user cannot contain password-file wildcards")
+	if strings.ContainsAny(p.Host, "/:, \\*") {
+		return errors.New("host must be a single DNS name")
+	}
+	for _, field := range []struct{ name, value string }{{"database", p.Database}, {"user", p.User}} {
+		if strings.Contains(field.value, "*") {
+			return fmt.Errorf("%s cannot contain the password-file wildcard *", field.name)
+		}
 	}
 	return nil
 }
