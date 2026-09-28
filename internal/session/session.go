@@ -169,7 +169,6 @@ func (r *Runner) refresh(ctx context.Context, target Target, port int, client Cl
 	}
 }
 
-// sleepUntil waits for a wall-clock deadline and reports whether it was reached.
 func sleepUntil(ctx context.Context, due time.Time) bool {
 	for {
 		wait := time.Until(due)
@@ -205,7 +204,6 @@ func (r *Runner) renew(ctx context.Context, target Target, port int, client Clie
 	return credential, nil
 }
 
-// renewalTime has no monotonic reading, so comparisons use the wall clock.
 func renewalTime(credential Credential) time.Time {
 	now := time.Now().Round(0)
 	if credential.ExpiresAt.IsZero() {

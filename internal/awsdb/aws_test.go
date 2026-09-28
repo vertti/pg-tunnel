@@ -30,12 +30,10 @@ import (
 
 type rdsFunc func(context.Context, *rds.DescribeDBInstancesInput) (*rds.DescribeDBInstancesOutput, error)
 
-// DescribeDBInstances supplies a fake RDS response.
 func (f rdsFunc) DescribeDBInstances(ctx context.Context, input *rds.DescribeDBInstancesInput, _ ...func(*rds.Options)) (*rds.DescribeDBInstancesOutput, error) {
 	return f(ctx, input)
 }
 
-// DescribeDBClusters rejects accidental cluster lookups in instance tests.
 func (rdsFunc) DescribeDBClusters(context.Context, *rds.DescribeDBClustersInput, ...func(*rds.Options)) (*rds.DescribeDBClustersOutput, error) {
 	return nil, errors.New("unexpected cluster discovery")
 }
@@ -56,7 +54,6 @@ func TestRDSDiscovery(t *testing.T) {
 
 type ec2Func func(context.Context, *ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error)
 
-// DescribeInstances supplies fake paginated jump-host discovery.
 func (f ec2Func) DescribeInstances(ctx context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 	return f(ctx, input)
 }
@@ -99,7 +96,6 @@ func TestIAMSignsRemoteEndpointAndReportsExpiry(t *testing.T) {
 
 type providerFunc func(context.Context) (aws.Credentials, error)
 
-// Retrieve supplies renewable AWS credentials.
 func (f providerFunc) Retrieve(ctx context.Context) (aws.Credentials, error) { return f(ctx) }
 
 func TestIAMRetrievesCredentialsOnEveryRefresh(t *testing.T) {
@@ -129,18 +125,15 @@ type fakeSSM struct {
 	terminateTime  time.Duration
 }
 
-// DescribeSessions returns the configured remote cleanup outcome.
 func (f *fakeSSM) DescribeSessions(_ context.Context, input *ssm.DescribeSessionsInput, _ ...func(*ssm.Options)) (*ssm.DescribeSessionsOutput, error) {
 	f.historyInput = input
 	return &ssm.DescribeSessionsOutput{Sessions: f.history}, f.historyErr
 }
 
-// StartSession returns synthetic session details without contacting AWS.
 func (*fakeSSM) StartSession(context.Context, *ssm.StartSessionInput, ...func(*ssm.Options)) (*ssm.StartSessionOutput, error) {
 	return &ssm.StartSessionOutput{SessionId: aws.String("session-example"), TokenValue: aws.String("sensitive-token"), StreamUrl: aws.String("wss://example.invalid")}, nil
 }
 
-// TerminateSession records remote cleanup.
 func (f *fakeSSM) TerminateSession(ctx context.Context, input *ssm.TerminateSessionInput, _ ...func(*ssm.Options)) (*ssm.TerminateSessionOutput, error) {
 	f.terminated = aws.ToString(input.SessionId)
 	if deadline, ok := ctx.Deadline(); ok {
@@ -152,7 +145,7 @@ func (f *fakeSSM) TerminateSession(ctx context.Context, input *ssm.TerminateSess
 func TestPluginFailureTerminatesRemoteSession(t *testing.T) {
 	t.Parallel()
 	plugin := filepath.Join(t.TempDir(), "plugin")
-	require.NoError(t, os.WriteFile(plugin, []byte("#!/bin/sh\nprintf 'sensitive-token\\n'\nexit 7\n"), 0o700)) //nolint:gosec // The fake plugin must be executable by the test owner.
+	require.NoError(t, os.WriteFile(plugin, []byte("#!/bin/sh\nprintf 'sensitive-token\\n'\nexit 7\n"), 0o700))
 	api := &fakeSSM{}
 	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: plugin}
 	_, err := transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})

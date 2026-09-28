@@ -27,10 +27,10 @@ func TestSavePreservesProfilesAndRefusesReplacement(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, p.User, second.User)
 	assert.Equal(t, filepath.Join(filepath.Dir(path), "ca.pem"), second.RootCert)
-	before, err := os.ReadFile(path) //nolint:gosec // The path is inside t.TempDir.
+	before, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.ErrorContains(t, profile.Save(path, "first", &p), "already exists")
-	after, err := os.ReadFile(path) //nolint:gosec // The path is inside t.TempDir.
+	after, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, before, after)
 	info, err := os.Stat(path)
@@ -50,7 +50,7 @@ func TestSaveRefusesUnsafeDestinations(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 			require.Error(t, profile.Save(path, "dev", &p))
-			actual, err := os.ReadFile(path) //nolint:gosec // The path is inside t.TempDir.
+			actual, err := os.ReadFile(path)
 			require.NoError(t, err)
 			assert.Equal(t, content, string(actual))
 		})
@@ -60,7 +60,7 @@ func TestSaveRefusesUnsafeDestinations(t *testing.T) {
 	require.NoError(t, os.Symlink("missing", path))
 	require.ErrorContains(t, profile.Save(path, "dev", &p), "refusing to replace")
 	require.NoError(t, os.Remove(path))
-	lock, err := os.Open(directory) //nolint:gosec // The directory is owned by this test.
+	lock, err := os.Open(directory)
 	require.NoError(t, err)
 	require.NoError(t, unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB))
 	t.Cleanup(func() { require.NoError(t, lock.Close()) })
@@ -90,7 +90,7 @@ func TestSaveRefusesToGrowPastSizeLimit(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	p := profile.Profile{DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432}
 	require.ErrorContains(t, profile.Save(path, "dev", &p), "exceeds the 1 MiB size limit")
-	actual, err := os.ReadFile(path) //nolint:gosec // The path is inside t.TempDir.
+	actual, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, content, string(actual))
 }
@@ -100,7 +100,7 @@ func TestSaveWritesOnlySetFieldsInReadingOrder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	p := profile.Profile{DBInstance: "orders-db", Port: 5432, Database: "orders", User: "reader", Target: "i-0abc", Region: "eu-central-1"}
 	require.NoError(t, profile.Save(path, "orders", &p))
-	saved, err := os.ReadFile(path) //nolint:gosec // The path is inside t.TempDir.
+	saved, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"profiles":{"orders":{"db_instance":"orders-db","port":5432,"database":"orders","user":"reader","target":"i-0abc","region":"eu-central-1"}}}`, string(saved))
 	text := string(saved)

@@ -21,7 +21,7 @@ import (
 	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
-const postgresPassword = "test-postgres-password" //nolint:gosec // A disposable local test database credential.
+const postgresPassword = "test-postgres-password"
 
 func TestVerifySCRAMWithPostgresAndIgnoresAmbientSettings(t *testing.T) {
 	target, port := startPostgres(t, requireInitdb(t))
@@ -96,7 +96,7 @@ func startPostgres(t *testing.T, initdb string) (target session.Target, port int
 		}
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 15*time.Second)
 		defer cancel()
-		output, stopErr := exec.CommandContext(ctx, pgctl, "-D", database, "-m", "immediate", "-w", "stop").CombinedOutput() //nolint:gosec // The executable is the locally discovered PostgreSQL test control tool.
+		output, stopErr := exec.CommandContext(ctx, pgctl, "-D", database, "-m", "immediate", "-w", "stop").CombinedOutput()
 		assert.NoError(t, stopErr, "%s", output)
 	})
 	runPostgresTool(t, pgctl, "-D", database, "-l", filepath.Join(dir, "postgres.log"), "-w", "-t", "10", "-o", options, "start")
@@ -107,7 +107,7 @@ func runPostgresTool(t *testing.T, program string, args ...string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, program, args...).CombinedOutput() //nolint:gosec // The executable is discovered locally; arguments belong to this isolated test database.
+	output, err := exec.CommandContext(ctx, program, args...).CombinedOutput()
 	require.NoError(t, err, "%s", output)
 }
 
@@ -121,7 +121,7 @@ func TestPrivilegeWarningsForRoleMembershipAndRestrictedCatalogs(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	executeSQL := func(query string) {
 		t.Helper()
-		cmd := exec.CommandContext(t.Context(), filepath.Join(filepath.Dir(initdb), "psql"), "-X", "-v", "ON_ERROR_STOP=1", "-c", query) //nolint:gosec // Local test PostgreSQL tools and fixture SQL.
+		cmd := exec.CommandContext(t.Context(), filepath.Join(filepath.Dir(initdb), "psql"), "-X", "-v", "ON_ERROR_STOP=1", "-c", query)
 		cmd.Env = client.Env(os.Environ())
 		output, runErr := cmd.CombinedOutput()
 		require.NoError(t, runErr, "%s", output)

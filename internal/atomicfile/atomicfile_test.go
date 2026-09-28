@@ -18,7 +18,7 @@ func TestWriteReplacesPrivatelyWithoutTemporaryFiles(t *testing.T) {
 	require.NoError(t, atomicfile.Write(path, []byte("first")))
 	require.NoError(t, atomicfile.Write(path, []byte("second")))
 
-	data, err := os.ReadFile(path) //nolint:gosec // The path is inside the test's temporary directory.
+	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "second", string(data))
 	info, err := os.Stat(path)

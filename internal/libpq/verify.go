@@ -64,7 +64,7 @@ func verificationConfig(target session.Target, port int, credential session.Cred
 	return config, nil
 }
 
-// TLSConfig loads the configured trust roots before any AWS session is opened.
+// TLSConfig verifies target.Host against the certificates in target.RootCert.
 func TLSConfig(target session.Target) (*tls.Config, error) {
 	cert, err := os.ReadFile(target.RootCert)
 	if err != nil {

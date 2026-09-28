@@ -34,7 +34,7 @@ func envValue(env []string, name string) string {
 func TestPrivateFilesRefreshAndCleanup(t *testing.T) {
 	t.Parallel()
 	factory := libpq.Files{Root: filepath.Join(t.TempDir(), "sessions")}
-	client, err := factory.Prepare(target(), 15432, session.Credential{Secret: `token:with\escapes`}) //nolint:gosec // Synthetic credential exercises PostgreSQL password-file escaping.
+	client, err := factory.Prepare(target(), 15432, session.Credential{Secret: `token:with\escapes`})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	env := client.Env([]string{"PGPASSWORD=stale", "PGHOST=wrong", "PGSERVICE=wrong", "PATH=/bin"})
@@ -50,13 +50,13 @@ func TestPrivateFilesRefreshAndCleanup(t *testing.T) {
 	info, err := os.Stat(filepath.Dir(passwordFile))
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
-	data, err := os.ReadFile(passwordFile) //nolint:gosec // Read back the credential file just created inside t.TempDir.
+	data, err := os.ReadFile(passwordFile)
 	require.NoError(t, err)
 	parsed, err := pgpassfile.ParsePassfile(strings.NewReader(string(data)))
 	require.NoError(t, err)
 	assert.Equal(t, `token:with\escapes`, parsed.FindPassword("db.example", "15432", "data", "reader"))
 	require.NoError(t, client.Update(session.Credential{Secret: "replacement"}))
-	data, err = os.ReadFile(passwordFile) //nolint:gosec // Read back the credential file just created inside t.TempDir.
+	data, err = os.ReadFile(passwordFile)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "replacement")
 	assert.NotContains(t, string(data), "token")
@@ -111,10 +111,10 @@ func TestUnsafeStorageAndSettingsRejected(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "sessions")
 	require.NoError(t, os.Mkdir(root, 0o700))
-	require.NoError(t, os.Chmod(root, 0o755)) //nolint:gosec // Deliberately unsafe permissions exercise rejection.
+	require.NoError(t, os.Chmod(root, 0o755))
 	_, err := (libpq.Files{Root: root}).Prepare(target(), 12345, session.Credential{Secret: "secret"})
 	require.ErrorContains(t, err, "0700")
-	require.NoError(t, os.Chmod(root, 0o700)) //nolint:gosec // Directories require the execute bit for owner access.
+	require.NoError(t, os.Chmod(root, 0o700))
 	bad := target()
 	bad.Database = "data\nsslmode=disable"
 	_, err = (libpq.Files{Root: root}).Prepare(bad, 12345, session.Credential{Secret: "secret"})
@@ -128,7 +128,7 @@ func TestRecoveryWaitsForStorageLock(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "sessions")
 	require.NoError(t, os.Mkdir(root, 0o700))
-	holder, err := os.Open(root) //nolint:gosec // The directory is inside t.TempDir.
+	holder, err := os.Open(root)
 	require.NoError(t, err)
 	require.NoError(t, unix.Flock(int(holder.Fd()), unix.LOCK_EX))
 	recovered := make(chan error, 1)
@@ -186,20 +186,20 @@ func TestRecoveryAfterSIGKILL(t *testing.T) {
 	})
 	marker := filepath.Join(root, "ready")
 	require.Eventually(t, func() bool { _, statErr := os.Stat(marker); return statErr == nil }, 5*time.Second, 10*time.Millisecond)
-	data, err := os.ReadFile(marker) //nolint:gosec // The marker is written by the test child in t.TempDir.
+	data, err := os.ReadFile(marker)
 	require.NoError(t, err)
 	dir := string(data)
 	removed, err := (libpq.Files{Root: root}).Recover()
 	require.NoError(t, err)
 	assert.Zero(t, removed)
-	_, err = os.Stat(dir) //nolint:gosec // This path comes from the test child running under t.TempDir.
+	_, err = os.Stat(dir)
 	require.NoError(t, err, "a live owner's credentials must be retained")
 	require.NoError(t, child.Process.Kill())
 	require.Error(t, child.Wait())
 	removed, err = (libpq.Files{Root: root}).Recover()
 	require.NoError(t, err)
 	assert.Equal(t, 1, removed)
-	_, err = os.Stat(dir) //nolint:gosec // This path comes from the test child running under t.TempDir.
+	_, err = os.Stat(dir)
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 

@@ -68,7 +68,7 @@ func TestRDSCACacheDownloadsReusesRefreshesAndPreservesLastGoodBundle(t *testing
 	require.NoError(t, os.Chtimes(path, stale, stale))
 	_, err = cachedCA(t.Context(), server.Client(), path, server.URL, report)
 	require.NoError(t, err)
-	actual, err := os.ReadFile(path) //nolint:gosec // The cache is inside t.TempDir.
+	actual, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, replacement, actual)
 	require.NoError(t, os.Chtimes(path, stale, stale))
@@ -76,7 +76,7 @@ func TestRDSCACacheDownloadsReusesRefreshesAndPreservesLastGoodBundle(t *testing
 	_, err = cachedCA(t.Context(), server.Client(), path, server.URL, report)
 	require.NoError(t, err)
 	assert.Contains(t, strings.Join(messages, "\n"), "using the cached bundle")
-	actual, err = os.ReadFile(path) //nolint:gosec // The cache is inside t.TempDir.
+	actual, err = os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, replacement, actual)
 	info, err := os.Stat(path)
@@ -137,7 +137,7 @@ func TestRDSCACorruptCacheIsReplaced(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte("broken"), 0o600))
 	_, err := cachedCA(t.Context(), server.Client(), path, server.URL, nil)
 	require.NoError(t, err)
-	actual, err := os.ReadFile(path) //nolint:gosec // The cache is inside t.TempDir.
+	actual, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, data, actual)
 }

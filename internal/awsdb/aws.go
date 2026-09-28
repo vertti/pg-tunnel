@@ -27,7 +27,7 @@ type RDSAPI interface {
 	DescribeDBInstances(context.Context, *rds.DescribeDBInstancesInput, ...func(*rds.Options)) (*rds.DescribeDBInstancesOutput, error)
 }
 
-// EC2API resolves a jump-host tag without selecting an arbitrary match.
+// EC2API is the EC2 subset used by JumpHost.
 type EC2API interface {
 	DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
 }
