@@ -17,13 +17,21 @@ import (
 )
 
 // Files creates isolated libpq settings in a directory owned by the current user.
-type Files struct{ Root string }
+// When a session gets its fixed LocalPort, it also keeps a block in the shared
+// Pgpass file so apps started outside the session can connect to localhost.
+type Files struct {
+	Report    func(string)
+	Root      string
+	Pgpass    string
+	LocalPort int
+}
 
 // client holds an advisory lock until credential cleanup finishes.
 type client struct {
 	err    error
 	lock   *os.File
 	dir    string
+	pgpass string
 	target session.Target
 	port   int
 	once   sync.Once
@@ -36,7 +44,7 @@ func (f Files) Prepare(target session.Target, port int, credential session.Crede
 		return nil, err
 	}
 	defer root.Close() //nolint:errcheck // Closing this read-only directory only releases its advisory lock.
-	if _, recoveryErr := recoverSessions(f.Root); recoveryErr != nil {
+	if _, recoveryErr := f.recover(); recoveryErr != nil {
 		return nil, recoveryErr
 	}
 	dir, err := os.MkdirTemp(f.Root, "session-")
@@ -48,10 +56,20 @@ func (f Files) Prepare(target session.Target, port int, credential session.Crede
 		return nil, errors.Join(err, os.RemoveAll(dir))
 	}
 	c := &client{target: target, port: port, dir: dir, lock: lock}
+	if f.shares(port) {
+		c.pgpass = f.Pgpass
+	}
 	if err = c.initialize(credential); err != nil {
 		return nil, errors.Join(err, c.Close())
 	}
+	if c.pgpass != "" && f.Report != nil {
+		f.Report(fmt.Sprintf("Apps such as Postico can connect to host localhost, port %d, database %q, user %q, SSL required, password left empty (%s holds the current one). Connection string:\n  %s", port, c.target.Database, c.target.User, displayPath(c.pgpass), c.connectionString()))
+	}
 	return c, nil
+}
+
+func (f Files) shares(port int) bool {
+	return f.Pgpass != "" && f.LocalPort != 0 && port == f.LocalPort
 }
 
 func (c *client) initialize(credential session.Credential) error {
@@ -72,13 +90,17 @@ func (c *client) Update(credential session.Credential) error {
 	if credential.Secret == "" || strings.ContainsAny(credential.Secret, "\r\n\x00") {
 		return errors.New("credential is empty or contains unsupported control characters")
 	}
-	escape := strings.NewReplacer("\\", "\\\\", ":", "\\:")
-	fields := []string{c.target.Host, strconv.Itoa(c.port), c.target.Database, c.target.User, credential.Secret}
-	for index := range fields {
-		fields[index] = escape.Replace(fields[index])
+	line := pgpassLine(c.target.Host, strconv.Itoa(c.port), c.target.Database, c.target.User, credential.Secret)
+	if err := atomicWrite(c.dir, "pgpass", line+"\n"); err != nil {
+		return err
 	}
-	return atomicWrite(c.dir, "pgpass", strings.Join(fields, ":")+"\n")
+	if c.pgpass == "" {
+		return nil
+	}
+	return editShared(c.pgpass, c.sharedLock(), filepath.Base(c.dir), c.sharedLines(credential.Secret))
 }
+
+func (c *client) sharedLock() string { return filepath.Join(filepath.Dir(c.dir), "pgpass.lock") }
 
 // Env replaces inherited libpq settings while leaving unrelated variables alone.
 func (c *client) Env(base []string) []string {
@@ -93,7 +115,12 @@ func (c *client) Env(base []string) []string {
 
 // Close removes credentials before releasing ownership and is safe to repeat.
 func (c *client) Close() error {
-	c.once.Do(func() { c.err = errors.Join(os.RemoveAll(c.dir), c.lock.Close()) })
+	c.once.Do(func() {
+		if c.pgpass != "" {
+			c.err = editShared(c.pgpass, c.sharedLock(), filepath.Base(c.dir), nil)
+		}
+		c.err = errors.Join(c.err, os.RemoveAll(c.dir), c.lock.Close())
+	})
 	if c.err != nil {
 		return fmt.Errorf("remove private client settings: %w", c.err)
 	}
@@ -108,7 +135,15 @@ func (f Files) Recover() (int, error) {
 		return 0, err
 	}
 	defer root.Close() //nolint:errcheck // Closing this read-only directory only releases its advisory lock.
-	return recoverSessions(f.Root)
+	return f.recover()
+}
+
+func (f Files) recover() (int, error) {
+	removed, err := recoverSessions(f.Root)
+	if err != nil || f.Pgpass == "" {
+		return removed, err
+	}
+	return removed, recoverShared(f.Pgpass, filepath.Join(f.Root, "pgpass.lock"), f.Root)
 }
 
 func (f Files) rootLock() (*os.File, error) {

@@ -138,10 +138,11 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	if err != nil {
 		return fmt.Errorf("discover jump host: %w", err)
 	}
-	root, err := sessionRoot()
+	files, err := sessionFiles()
 	if err != nil {
 		return err
 	}
+	files.LocalPort, files.Report = p.LocalPort, report
 	authentication, err := databaseAuth(p, &cfg, report)
 	if err != nil {
 		return err
@@ -154,7 +155,7 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 		Target:    target,
 		Transport: &awsdb.SSM{API: ssm.NewFromConfig(cfg), Region: cfg.Region, Profile: p.AWSProfile, Target: jump, LocalPort: p.LocalPort, Report: report},
 		Auth:      authentication,
-		Clients:   libpq.Files{Root: root}, Verify: libpq.Verify, Env: os.Environ(), Report: report,
+		Clients:   files, Verify: libpq.Verify, Env: os.Environ(), Report: report,
 		Command: command,
 	}
 	if err = runner.Run(ctx); err != nil {
@@ -184,7 +185,7 @@ func sessionCommand(command []string, stdout io.Writer, report func(string)) ses
 		if len(command) > 0 {
 			return process.Run(ctx, command, env)
 		}
-		report("Client settings for other terminals follow; keep this session running (Ctrl-C closes it).")
+		report("Keep this window open; Ctrl-C closes the tunnel. For psql or scripts in another terminal with full TLS verification, paste these exports there:")
 		for _, entry := range env {
 			name, value, _ := strings.Cut(entry, "=")
 			if !strings.HasPrefix(name, "PG") {
@@ -246,12 +247,16 @@ func environmentExpiry() (time.Time, error) {
 	return expiry, nil
 }
 
-func sessionRoot() (string, error) {
+func sessionFiles() (libpq.Files, error) {
 	cache, err := os.UserCacheDir()
 	if err != nil {
-		return "", fmt.Errorf("find user cache directory: %w", err)
+		return libpq.Files{}, fmt.Errorf("find user cache directory: %w", err)
 	}
-	return filepath.Join(cache, "pg-tunnel", "sessions"), nil
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return libpq.Files{}, fmt.Errorf("find home directory: %w", err)
+	}
+	return libpq.Files{Root: filepath.Join(cache, "pg-tunnel", "sessions"), Pgpass: filepath.Join(home, ".pgpass")}, nil
 }
 
 func cleanupCommand(args []string, stdout, stderr io.Writer) error {
@@ -269,11 +274,11 @@ func cleanupCommand(args []string, stdout, stderr io.Writer) error {
 }
 
 func cleanup(output io.Writer) error {
-	root, err := sessionRoot()
+	files, err := sessionFiles()
 	if err != nil {
 		return err
 	}
-	removed, err := (libpq.Files{Root: root}).Recover()
+	removed, err := files.Recover()
 	if err != nil {
 		return fmt.Errorf("recover abandoned credentials: %w", err)
 	}

@@ -165,9 +165,11 @@ func TestProductionWarningBeforeConnection(t *testing.T) {
 
 func TestCleanupRemovesAbandonedSessions(t *testing.T) {
 	isolateAWS(t)
-	root, err := sessionRoot()
+	files, err := sessionFiles()
 	require.NoError(t, err)
-	abandoned := filepath.Join(root, "session-abandoned")
+	abandoned := filepath.Join(files.Root, "session-abandoned")
+	stale := "# pg-tunnel session-abandoned begin (managed; removed when the session ends)\nlocalhost:15000:data:reader:secret\n# pg-tunnel session-abandoned end\n"
+	require.NoError(t, os.WriteFile(files.Pgpass, []byte(stale+"own:5432:*:me:kept\n"), 0o600))
 	require.NoError(t, os.MkdirAll(abandoned, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(abandoned, "pgpass"), []byte("secret"), 0o600))
 	require.ErrorIs(t, RunContext(t.Context(), []string{"cleanup", "extra"}, io.Discard, io.Discard), ErrUsage)
@@ -176,6 +178,9 @@ func TestCleanupRemovesAbandonedSessions(t *testing.T) {
 	assert.Equal(t, "Removed 1 abandoned session(s).\n", summary.String())
 	_, err = os.Stat(abandoned)
 	require.ErrorIs(t, err, os.ErrNotExist)
+	shared, err := os.ReadFile(files.Pgpass)
+	require.NoError(t, err)
+	assert.Equal(t, "own:5432:*:me:kept\n", string(shared))
 }
 
 // isolateAWS keeps the developer's AWS configuration, credentials, and caches out of a test.

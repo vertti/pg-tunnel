@@ -179,15 +179,29 @@ such as one per worktree, gets its own tunnel and credentials. Restarting a
 notebook leaves the tunnel running; shutting down its server closes it.
 Already-running servers do not inherit the connection settings.
 
-For a separately launched client:
+For apps you start separately, such as Postico, a Jupyter server or scripts,
+keep a tunnel open in a terminal:
 
 ```sh
 pg-tunnel connect development
 ```
 
-Copy its printed shell exports to another terminal, or configure your client's
-service and password file paths. Keep `connect` running; Ctrl-C closes it and
-exits 0. GUI support depends on the [client](compatibility.md).
+With a fixed `local_port`, which `init` sets, the session prints the address and
+a connection string:
+
+```text
+pg-tunnel: Apps such as Postico can connect to host localhost, port 15000, database "data", user "reader", SSL required, password left empty (~/.pgpass holds the current one). Connection string:
+  postgresql://reader@localhost:15000/data?sslmode=require
+```
+
+Use those settings as they are and leave the password empty. While the session
+runs, pg-tunnel keeps the current password or IAM token in a marked block at the
+top of `~/.pgpass` and removes the block when the session ends; other lines are
+left unchanged. These clients connect to `localhost`, so TLS encrypts the
+connection but cannot verify the database hostname. For full verification,
+paste the printed shell exports into another terminal instead. Keep `connect`
+running; Ctrl-C closes it and exits 0. GUI support depends on the
+[client](compatibility.md).
 
 See [network recovery](recovery.md) and the [container recipe](containers.md)
 for those environments.
@@ -200,9 +214,10 @@ after a password rotation. Refreshed credentials must pass a database login befo
 replacing the password file; failures retain the previous credentials and retry.
 Token expiry affects new logins, not established connections.
 
-Credentials stay in private files (0600) inside a private directory (0700).
-The shared `~/.pgpass` is never modified. Shutdown stops the client and tunnel,
-removes temporary credentials, and requests remote session termination.
+Credentials stay in private files (0600) inside a private directory (0700),
+plus the marked `~/.pgpass` block when `local_port` is fixed. Shutdown stops the
+client and tunnel, removes temporary credentials, and requests remote session
+termination.
 
 `run` preserves the client command's exit status; its own errors exit 1 and usage
 errors exit 2. Signals are forwarded to the client; Ctrl-Z and `fg` suspend and

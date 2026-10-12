@@ -216,3 +216,107 @@ func TestCredentialOwnerHelper(t *testing.T) {
 	require.NoError(t, atomicfile.Write(filepath.Join(root, "ready"), []byte(dir)))
 	time.Sleep(time.Hour)
 }
+
+func sharedFiles(t *testing.T, existing string) (files libpq.Files, reports *[]string) {
+	t.Helper()
+	directory := t.TempDir()
+	pgpass := filepath.Join(directory, ".pgpass")
+	if existing != "" {
+		require.NoError(t, os.WriteFile(pgpass, []byte(existing), 0o600))
+	}
+	reports = new([]string)
+	return libpq.Files{Root: filepath.Join(directory, "sessions"), Pgpass: pgpass, LocalPort: 15000, Report: func(message string) { *reports = append(*reports, message) }}, reports
+}
+
+func sharedPassword(t *testing.T, path, host string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	parsed, err := pgpassfile.ParsePassfile(strings.NewReader(string(data)))
+	require.NoError(t, err)
+	return parsed.FindPassword(host, "15000", "data", "reader")
+}
+
+func TestSharedPgpassFollowsSessionAndKeepsOtherLines(t *testing.T) {
+	t.Parallel()
+	own := "# my entries\nlocalhost:15000:data:reader:stale\nother:5432:*:me:mine\n"
+	files, reports := sharedFiles(t, own)
+	client, err := files.Prepare(target(), 15000, session.Credential{Secret: `token:with\escapes`})
+	require.NoError(t, err)
+	for _, host := range []string{"localhost", "127.0.0.1"} {
+		assert.Equal(t, `token:with\escapes`, sharedPassword(t, files.Pgpass, host), "the managed block wins over older lines")
+	}
+	info, err := os.Stat(files.Pgpass)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	require.Len(t, *reports, 1)
+	assert.Contains(t, (*reports)[0], "localhost:15000")
+	assert.Contains(t, (*reports)[0], "postgresql://reader@localhost:15000/data?sslmode=require")
+	require.NoError(t, client.Update(session.Credential{Secret: "replacement"}))
+	assert.Equal(t, "replacement", sharedPassword(t, files.Pgpass, "localhost"))
+	require.NoError(t, client.Close())
+	data, err := os.ReadFile(files.Pgpass)
+	require.NoError(t, err)
+	assert.Equal(t, own, string(data))
+}
+
+func TestSharedPgpassOnlyForTheFixedPort(t *testing.T) {
+	t.Parallel()
+	for name, files := range map[string]func(libpq.Files) libpq.Files{
+		"fallback port": func(f libpq.Files) libpq.Files { return f },
+		"no fixed port": func(f libpq.Files) libpq.Files { f.LocalPort = 0; return f },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			base, reports := sharedFiles(t, "")
+			client, err := files(base).Prepare(target(), 15001, session.Credential{Secret: "token"})
+			require.NoError(t, err)
+			require.NoError(t, client.Update(session.Credential{Secret: "replacement"}))
+			require.NoError(t, client.Close())
+			assert.NoFileExists(t, base.Pgpass)
+			assert.Empty(t, *reports)
+		})
+	}
+}
+
+func TestSharedPgpassWritesThroughSymlink(t *testing.T) {
+	t.Parallel()
+	files, _ := sharedFiles(t, "")
+	target := filepath.Join(t.TempDir(), "dotfiles-pgpass")
+	require.NoError(t, os.WriteFile(target, []byte("other:5432:*:me:mine\n"), 0o600))
+	require.NoError(t, os.Symlink(target, files.Pgpass))
+	client, err := files.Prepare(session.Target{Host: "db.example", Port: 5432, Database: "data", User: "reader", RootCert: "/tmp/ca.pem"}, 15000, session.Credential{Secret: "token"})
+	require.NoError(t, err)
+	info, err := os.Lstat(files.Pgpass)
+	require.NoError(t, err)
+	assert.Equal(t, os.ModeSymlink, info.Mode().Type())
+	assert.Equal(t, "token", sharedPassword(t, target, "localhost"))
+	require.NoError(t, client.Close())
+}
+
+func TestRecoveryRemovesSharedBlocksOfDeadSessionsOnly(t *testing.T) {
+	t.Parallel()
+	dead := "# pg-tunnel session-dead begin (managed; removed when the session ends)\nlocalhost:15009:data:reader:old\n# pg-tunnel session-dead end\n"
+	files, _ := sharedFiles(t, dead+"other:5432:*:me:mine\n")
+	live, err := files.Prepare(target(), 15000, session.Credential{Secret: "token"})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, live.Close()) })
+	_, err = files.Recover()
+	require.NoError(t, err)
+	data, err := os.ReadFile(files.Pgpass)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "session-dead")
+	assert.Contains(t, string(data), "other:5432:*:me:mine\n")
+	assert.Equal(t, "token", sharedPassword(t, files.Pgpass, "localhost"))
+}
+
+func TestUnterminatedSharedBlockIsLeftAlone(t *testing.T) {
+	t.Parallel()
+	broken := "# pg-tunnel session-dead begin (managed; removed when the session ends)\nother:5432:*:me:mine\n"
+	files, _ := sharedFiles(t, broken)
+	_, err := files.Recover()
+	require.NoError(t, err)
+	data, err := os.ReadFile(files.Pgpass)
+	require.NoError(t, err)
+	assert.Equal(t, broken, string(data))
+}
