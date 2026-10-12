@@ -61,7 +61,7 @@ func (s *SSM) Open(ctx context.Context, target session.Target) (_ session.Tunnel
 			return nil, fmt.Errorf("locate pg-tunnel executable for SSM child: %w", err)
 		}
 	}
-	port, err := availablePort(ctx, s.LocalPort)
+	port, err := s.localPort(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +143,20 @@ func (s *SSM) pluginArgs(ctx context.Context, path string) ([]string, error) {
 		return nil, fmt.Errorf("resolve SSM endpoint: %w", err)
 	}
 	return []string{path, ssmplugin.Command, s.Region, s.Profile, s.Target, endpoint.URI.String()}, nil
+}
+
+func (s *SSM) localPort(ctx context.Context) (int, error) {
+	port, err := availablePort(ctx, s.LocalPort)
+	if err == nil || s.LocalPort == 0 {
+		return port, err
+	}
+	if port, err = availablePort(ctx, 0); err != nil {
+		return 0, err
+	}
+	if s.Report != nil {
+		s.Report(fmt.Sprintf("localhost:%d is already in use, probably by another pg-tunnel session; this session uses localhost:%d", s.LocalPort, port))
+	}
+	return port, nil
 }
 
 func availablePort(ctx context.Context, port int) (int, error) {
