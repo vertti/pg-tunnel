@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -63,6 +64,9 @@ func (w *Wizard) Run(ctx context.Context) error {
 	}
 	if detailsErr := connectionDetails(&ui, &p, db); detailsErr != nil {
 		return detailsErr
+	}
+	if p.LocalPort, err = freeLocalPort(ctx, w.Path); err != nil {
+		return err
 	}
 	if p.RootCert == "" {
 		logger := log.New(w.Output, "", 0)
@@ -238,15 +242,39 @@ func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error
 	if err := profile.Save(w.Path, name, p); err != nil {
 		return fmt.Errorf("save selected connection: %w", err)
 	}
-	return ui.print("Saved verified connection %q to %q. Connect with:\n  %s\n", name, w.Path, connectCommand(w.Path, name))
+	return ui.print("Saved verified connection %q to %q.\n\nRun a client through the tunnel:\n  %s\n\nOr keep the tunnel open on localhost:%d for Postico, Jupyter or scripts:\n  %s\n",
+		name, w.Path, command("run", w.Path, name)+" -- psql", p.LocalPort, command("connect", w.Path, name))
 }
 
-func connectCommand(path, name string) string {
-	command := "pg-tunnel run "
+func command(subcommand, path, name string) string {
+	command := "pg-tunnel " + subcommand + " "
 	if !selectedByDefault(path) {
 		command += "--config " + ShellQuote(path) + " "
 	}
-	return command + ShellQuote(name) + " -- psql"
+	return command + ShellQuote(name)
+}
+
+const firstLocalPort = 15000
+
+// freeLocalPort picks a stable port so saved client settings keep working across sessions.
+func freeLocalPort(ctx context.Context, path string) (int, error) {
+	used, err := profile.LocalPorts(path)
+	if err != nil {
+		return 0, fmt.Errorf("read saved local ports: %w", err)
+	}
+	for port := firstLocalPort; port < firstLocalPort+1000; port++ {
+		if used[port] {
+			continue
+		}
+		listener, listenErr := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if listenErr == nil {
+			if err = listener.Close(); err != nil {
+				return 0, fmt.Errorf("release local port check: %w", err)
+			}
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("no free local port from %d to %d; free one or set local_port in %s", firstLocalPort, firstLocalPort+999, path)
 }
 
 func selectedByDefault(path string) bool {

@@ -51,7 +51,7 @@ Existing connection names are not overwritten.
 | `target` | Explicit SSM managed instance ID. |
 | `jump_tag` | Alternative EC2 `Name` tag; must match one running instance. |
 | `region`, `aws_profile` | Overrides for the standard AWS configuration. |
-| `local_port` | Local port; default `0` selects an available port. |
+| `local_port` | Fixed local port for clients such as Postico; `init` picks a free one from 15000. `0` selects any available port. If the port is busy, the session uses another one and says so. |
 | `sslrootcert` | Custom CA PEM file; required for an explicit `host`. |
 
 For RDS instances and Aurora clusters, pg-tunnel downloads and caches the official
@@ -175,10 +175,9 @@ conn = psycopg.connect("")
 ```
 
 Notebooks in one Lab server share a tunnel. Each separately launched Lab server,
-such as one per worktree, gets its own tunnel and credentials. Leave `local_port`
-unset or `0` to avoid port conflicts. Restarting a notebook leaves the tunnel
-running; shutting down its server closes it. Already-running servers do not
-inherit the connection settings.
+such as one per worktree, gets its own tunnel and credentials. Restarting a
+notebook leaves the tunnel running; shutting down its server closes it.
+Already-running servers do not inherit the connection settings.
 
 For a separately launched client:
 
