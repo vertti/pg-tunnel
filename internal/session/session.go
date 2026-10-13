@@ -104,12 +104,12 @@ func (r *Runner) Run(ctx context.Context) (result error) {
 		return fmt.Errorf("verify database authentication: %w", err)
 	}
 
+	r.report(fmt.Sprintf("Database authentication verified; tunnel: 127.0.0.1:%d", tunnel.Port()))
 	client, err := r.Clients.Prepare(target, tunnel.Port(), credential)
 	if err != nil {
 		return fmt.Errorf("prepare client settings: %w", err)
 	}
 	defer func() { result = errors.Join(result, client.Close()) }()
-	r.report(fmt.Sprintf("Database authentication verified; tunnel: 127.0.0.1:%d", tunnel.Port()))
 	r.reportExpiry(credential)
 	startupCancel()
 	return r.runCommand(ctx, target, tunnel, client, credential)
