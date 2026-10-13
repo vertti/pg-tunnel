@@ -2,7 +2,10 @@
 
 Clients need to use the local tunnel, verify the database's real TLS hostname,
 and reread credentials for new connections. pg-tunnel supplies libpq service and
-password files; it does not set `PGPASSWORD` or rewrite `DATABASE_URL`.
+password files; it does not set `PGPASSWORD` or rewrite `DATABASE_URL`. With a
+fixed `local_port`, apps started separately can use `127.0.0.1` and the
+[shared `~/.pgpass`](usage.md#client-behavior) instead, without TLS hostname
+verification.
 
 | Client / tested version | Setup | Connection | IAM renewal |
 | --- | --- | --- | --- |
@@ -13,6 +16,8 @@ password files; it does not set `PGPASSWORD` or rewrite `DATABASE_URL`.
 | JupyterLab 4.6.3 + psycopg2 | [Launch the server through pg-tunnel](usage.md#client-behavior) | Works | Not separately tested in Jupyter |
 | Go pgx / pgxpool 5.11.0 | [Connection hook below](#go-pgx-pools) | Works with hook | Works with hook |
 | psql 18.6 in Docker Desktop | [Run both in the same container](containers.md) | Works | Works |
+| Postico 2.3.3 | [Printed host and port, empty password](usage.md#client-behavior); tested with `localhost` | Works | Works |
+| psql 18.6, SQLAlchemy 2.0.54 + psycopg2 2.9.13 | Printed connection string with `connect` running; tested with `localhost` | Works | psql works |
 | pgJDBC 42.7.13 | [JDBC limitations below](#dbeaver-and-jdbc) | No working recipe | Not tested |
 | DBeaver 26.2.1 | Uses JDBC | GUI not tested | Not tested |
 
