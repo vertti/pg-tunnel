@@ -190,14 +190,16 @@ With a fixed `local_port`, which `init` sets, the session prints the address and
 a connection string:
 
 ```text
-pg-tunnel: Apps such as Postico can connect to host localhost, port 15000, database "data", user "reader", SSL required, password left empty (~/.pgpass holds the current one). Connection string:
-  postgresql://reader@localhost:15000/data?sslmode=require
+pg-tunnel: Apps such as Postico can connect to host 127.0.0.1, port 15000, database "data", user "reader", SSL required, password left empty (~/.pgpass holds the current one). Connection string:
+  postgresql://reader@127.0.0.1:15000/data?sslmode=require
 ```
 
-Use those settings as they are and leave the password empty. While the session
+Use those settings as they are and leave the password empty. Prefer `127.0.0.1`
+to `localhost`, which clients may try over IPv6 first, where the tunnel does not
+listen. While the session
 runs, pg-tunnel keeps the current password or IAM token in a marked block at the
 top of `~/.pgpass` and removes the block when the session ends; other lines are
-left unchanged. These clients connect to `localhost`, so TLS encrypts the
+left unchanged. These clients connect to a local address, so TLS encrypts the
 connection but cannot verify the database hostname. For full verification,
 paste the printed shell exports into another terminal instead. Keep `connect`
 running; Ctrl-C closes it and exits 0. GUI support depends on the

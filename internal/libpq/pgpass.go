@@ -32,7 +32,7 @@ func pgpassLine(fields ...string) string {
 }
 
 func (c *client) connectionString() string {
-	address := url.URL{Scheme: "postgresql", User: url.User(c.target.User), Host: "localhost:" + strconv.Itoa(c.port), Path: "/" + c.target.Database, RawQuery: "sslmode=require"}
+	address := url.URL{Scheme: "postgresql", User: url.User(c.target.User), Host: "127.0.0.1:" + strconv.Itoa(c.port), Path: "/" + c.target.Database, RawQuery: "sslmode=require"}
 	return address.String()
 }
 

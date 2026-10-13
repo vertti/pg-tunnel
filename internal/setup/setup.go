@@ -242,7 +242,7 @@ func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error
 	if err := profile.Save(w.Path, name, p); err != nil {
 		return fmt.Errorf("save selected connection: %w", err)
 	}
-	return ui.print("Saved verified connection %q to %q.\n\nRun a client through the tunnel:\n  %s\n\nOr keep the tunnel open on localhost:%d for Postico, Jupyter or scripts:\n  %s\n",
+	return ui.print("Saved verified connection %q to %q.\n\nRun a client through the tunnel:\n  %s\n\nOr keep the tunnel open on 127.0.0.1:%d for Postico, Jupyter or scripts:\n  %s\n",
 		name, w.Path, command("run", w.Path, name)+" -- psql", p.LocalPort, command("connect", w.Path, name))
 }
 

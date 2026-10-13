@@ -63,7 +63,7 @@ func (f Files) Prepare(target session.Target, port int, credential session.Crede
 		return nil, errors.Join(err, c.Close())
 	}
 	if c.pgpass != "" && f.Report != nil {
-		f.Report(fmt.Sprintf("Apps such as Postico can connect to host localhost, port %d, database %q, user %q, SSL required, password left empty (%s holds the current one). Connection string:\n  %s", port, c.target.Database, c.target.User, displayPath(c.pgpass), c.connectionString()))
+		f.Report(fmt.Sprintf("Apps such as Postico can connect to host 127.0.0.1, port %d, database %q, user %q, SSL required, password left empty (%s holds the current one). Connection string:\n  %s", port, c.target.Database, c.target.User, displayPath(c.pgpass), c.connectionString()))
 	}
 	return c, nil
 }

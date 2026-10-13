@@ -119,7 +119,7 @@ func TestWizardDiscoversAcrossPagesAndSavesOnlyAfterConfirmation(t *testing.T) {
 			assert.Equal(t, ca, saved.RootCert)
 			assert.Equal(t, "dev", saved.AWSProfile)
 			assert.GreaterOrEqual(t, saved.LocalPort, 15000)
-			assert.Contains(t, output.String(), fmt.Sprintf("localhost:%d", saved.LocalPort))
+			assert.Contains(t, output.String(), fmt.Sprintf("127.0.0.1:%d", saved.LocalPort))
 			assert.Contains(t, output.String(), "pg-tunnel connect --config "+setup.ShellQuote(path)+" 'readonly'")
 			contents, err := os.ReadFile(path)
 			require.NoError(t, err)
