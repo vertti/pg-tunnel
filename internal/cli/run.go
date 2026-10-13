@@ -252,11 +252,11 @@ func sessionFiles() (libpq.Files, error) {
 	if err != nil {
 		return libpq.Files{}, fmt.Errorf("find user cache directory: %w", err)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return libpq.Files{}, fmt.Errorf("find home directory: %w", err)
+	files := libpq.Files{Root: filepath.Join(cache, "pg-tunnel", "sessions")}
+	if home, homeErr := os.UserHomeDir(); homeErr == nil {
+		files.Pgpass = filepath.Join(home, ".pgpass")
 	}
-	return libpq.Files{Root: filepath.Join(cache, "pg-tunnel", "sessions"), Pgpass: filepath.Join(home, ".pgpass")}, nil
+	return files, nil
 }
 
 func cleanupCommand(args []string, stdout, stderr io.Writer) error {
