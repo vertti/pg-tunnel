@@ -194,16 +194,14 @@ pg-tunnel: Apps such as Postico can connect to host 127.0.0.1, port 15000, datab
   postgresql://reader@127.0.0.1:15000/data?sslmode=require
 ```
 
-Use those settings as they are and leave the password empty. Prefer `127.0.0.1`
-to `localhost`, which clients may try over IPv6 first, where the tunnel does not
-listen. While the session
-runs, pg-tunnel keeps the current password or IAM token in a marked block at the
-top of `~/.pgpass` and removes the block when the session ends; other lines are
-left unchanged. These clients connect to a local address, so TLS encrypts the
-connection but cannot verify the database hostname. For full verification,
-paste the printed shell exports into another terminal instead. Keep `connect`
-running; Ctrl-C closes it and exits 0. GUI support depends on the
-[client](compatibility.md).
+Leave the password empty: while the session runs, pg-tunnel keeps the current
+password or IAM token in a marked block at the top of `~/.pgpass` and removes it
+when the session ends. Your other lines stay unchanged. Use `127.0.0.1` rather
+than `localhost`, which clients may try over IPv6 first, where the tunnel does
+not listen. TLS encrypts these connections but cannot verify the database
+hostname; for full verification, paste the printed shell exports into another
+terminal instead. Ctrl-C closes `connect` and exits 0. GUI support depends on
+the [client](compatibility.md).
 
 See [network recovery](recovery.md) and the [container recipe](containers.md)
 for those environments.
