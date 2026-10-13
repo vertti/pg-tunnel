@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -22,6 +24,7 @@ import (
 	"github.com/vertti/pg-tunnel/internal/awsdb"
 	"github.com/vertti/pg-tunnel/internal/libpq"
 	"github.com/vertti/pg-tunnel/internal/profile"
+	"github.com/vertti/pg-tunnel/internal/session"
 	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
@@ -156,4 +159,24 @@ func TestClusterRejectsUnusableDiscovery(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBusyLocalPortFallsBackToAnAvailablePort(t *testing.T) {
+	t.Parallel()
+	busy, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp4", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer busy.Close() //nolint:errcheck // Test listener.
+	address, ok := busy.Addr().(*net.TCPAddr)
+	require.True(t, ok)
+	port := address.Port
+	var reports []string
+	api := &endpointSSM{}
+	transport := awsdb.SSM{API: api, Target: "i-test", LocalPort: port, Report: func(message string) { reports = append(reports, message) }}
+	_, err = transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
+	require.ErrorContains(t, err, "fixture stops")
+	used := api.input.Parameters["localPortNumber"][0]
+	assert.NotEqual(t, strconv.Itoa(port), used)
+	require.Len(t, reports, 1)
+	assert.Contains(t, reports[0], fmt.Sprintf("localhost:%d is already in use", port))
+	assert.Contains(t, reports[0], "this session uses localhost:"+used)
 }

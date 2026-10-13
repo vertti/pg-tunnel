@@ -53,6 +53,19 @@ func Save(path, name string, p *Profile) error {
 	return writeConfig(path, profiles)
 }
 
+// LocalPorts reports the local ports that saved connections in path already use.
+func LocalPorts(path string) (map[int]bool, error) {
+	profiles, err := profilesToSave(path)
+	if err != nil {
+		return nil, err
+	}
+	used := make(map[int]bool, len(profiles))
+	for name := range profiles {
+		used[profiles[name].LocalPort] = true
+	}
+	return used, nil
+}
+
 func writeConfig(path string, profiles map[string]Profile) error {
 	data, err := json.MarshalIndent(configuration{Profiles: profiles}, "", "  ")
 	if err != nil {
