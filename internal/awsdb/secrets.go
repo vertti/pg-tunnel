@@ -47,11 +47,11 @@ func (s Secrets) Credential(ctx context.Context, target session.Target) (session
 }
 
 type databaseSecret struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Host     string `json:"host"`
-	Engine   string `json:"engine"`
-	Port     int    `json:"port"`
+	Username string      `json:"username"`
+	Password string      `json:"password"`
+	Host     string      `json:"host"`
+	Engine   string      `json:"engine"`
+	Port     json.Number `json:"port"`
 }
 
 func passwordCredential(value string, target session.Target) (session.Credential, error) {
@@ -78,7 +78,7 @@ func (secret *databaseSecret) validateEndpoint(target session.Target) error {
 	if secret.Host != "" && !strings.EqualFold(strings.TrimSuffix(secret.Host, "."), strings.TrimSuffix(target.Host, ".")) {
 		return errors.New("secret host does not match the configured database endpoint")
 	}
-	if secret.Port != 0 && secret.Port != target.Port {
+	if port, err := secret.Port.Int64(); secret.Port != "" && (err != nil || port != int64(target.Port)) {
 		return errors.New("secret port does not match the configured database endpoint")
 	}
 	return nil
