@@ -91,8 +91,7 @@ The SSM host must reach the database and support
 
 | Operation | Permissions |
 | --- | --- |
-| Open and close tunnels | `ssm:StartSession`, `ssm:TerminateSession` |
-| Confirm an already-ended session after a termination error | `ssm:DescribeSessions` |
+| Open and close tunnels | `ssm:StartSession`, and `ssm:TerminateSession` or `ssm:DescribeSessions` |
 | Recover an interrupted tunnel | `ssm:ResumeSession` |
 | Find an RDS instance | `rds:DescribeDBInstances` |
 | Find an Aurora cluster | `rds:DescribeDBClusters` |

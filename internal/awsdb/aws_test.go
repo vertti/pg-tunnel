@@ -115,11 +115,16 @@ type fakeSSM struct {
 	historyErr     error
 	terminated     string
 	history        []types.Session
+	historyDelay   int
 	terminateTime  time.Duration
 }
 
 func (f *fakeSSM) DescribeSessions(_ context.Context, input *ssm.DescribeSessionsInput, _ ...func(*ssm.Options)) (*ssm.DescribeSessionsOutput, error) {
 	f.historyInput = input
+	if f.historyDelay > 0 {
+		f.historyDelay--
+		return &ssm.DescribeSessionsOutput{}, f.historyErr
+	}
 	return &ssm.DescribeSessionsOutput{Sessions: f.history}, f.historyErr
 }
 
@@ -172,10 +177,13 @@ func TestRemoteCleanupConfirmsFailedTermination(t *testing.T) {
 		name           string
 		id             string
 		status         types.SessionStatus
+		historyDelay   int
 		wantFailure    bool
 	}{
 		{name: "accepted"},
 		{name: "already terminated", terminationErr: failure, id: "session-example", status: types.SessionStatusTerminated},
+		{name: "terminated shortly after", terminationErr: failure, id: "session-example", status: types.SessionStatusTerminated, historyDelay: 4},
+		{name: "terminated too late", terminationErr: failure, id: "session-example", status: types.SessionStatusTerminated, historyDelay: 20, wantFailure: true},
 		{name: "still terminating", terminationErr: failure, id: "session-example", status: types.SessionStatusTerminating, wantFailure: true},
 		{name: "different session", terminationErr: failure, id: "other", status: types.SessionStatusTerminated, wantFailure: true},
 		{name: "no history", terminationErr: failure, wantFailure: true},
@@ -183,12 +191,15 @@ func TestRemoteCleanupConfirmsFailedTermination(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			api := &fakeSSM{terminationErr: test.terminationErr, historyErr: test.historyErr}
+			api := &fakeSSM{terminationErr: test.terminationErr, historyErr: test.historyErr, historyDelay: test.historyDelay}
 			if test.id != "" {
 				api.history = []types.Session{{SessionId: aws.String(test.id), Status: test.status}}
 			}
 			transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: filepath.Join(t.TempDir(), "missing")}
-			_, err := transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
+			var err error
+			synctest.Test(t, func(t *testing.T) {
+				_, err = transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
+			})
 			require.ErrorContains(t, err, "launch embedded SSM child")
 			if test.wantFailure {
 				require.ErrorIs(t, err, failure)
