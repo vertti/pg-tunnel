@@ -219,19 +219,41 @@ func (t *tunnel) terminateRemote(ctx context.Context) error {
 		return nil
 	}
 	terminationErr := fmt.Errorf("terminate SSM session %s: %w", t.sessionID, err)
+	// The session reaches history a few seconds after the plugin stops.
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		ended, err := t.ended(ctx)
+		switch {
+		case ended:
+			return nil
+		case ctx.Err() != nil:
+			return terminationErr
+		case err != nil:
+			return errors.Join(terminationErr, fmt.Errorf("confirm SSM session termination (requires ssm:DescribeSessions): %w", err))
+		}
+		select {
+		case <-ctx.Done():
+			return terminationErr
+		case <-ticker.C:
+		}
+	}
+}
+
+func (t *tunnel) ended(ctx context.Context) (bool, error) {
 	history, err := t.api.DescribeSessions(ctx, &ssm.DescribeSessionsInput{
 		State:   types.SessionStateHistory,
 		Filters: []types.SessionFilter{{Key: types.SessionFilterKeySessionId, Value: aws.String(t.sessionID)}},
 	})
 	if err != nil {
-		return errors.Join(terminationErr, fmt.Errorf("confirm SSM session termination (requires ssm:DescribeSessions): %w", err))
+		return false, err //nolint:wrapcheck // terminateRemote adds the context.
 	}
 	for _, item := range history.Sessions {
 		if aws.ToString(item.SessionId) == t.sessionID && item.Status == types.SessionStatusTerminated {
-			return nil
+			return true, nil
 		}
 	}
-	return terminationErr
+	return false, nil
 }
 
 func (t *tunnel) waitReady(ctx context.Context) error {
