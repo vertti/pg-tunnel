@@ -31,9 +31,11 @@ func TestSecretsValidateWithoutLeakingValues(t *testing.T) {
 		{"missing password", `{"username":"reader"}`, "password"},
 		{"newline", `{"username":"reader","password":"private-marker\n"}`, "unsupported"},
 		{"wrong host", `{"username":"reader","password":"private-marker","host":"other.example"}`, "host"},
+		{"string port", `{"username":"reader","password":"test:password\\value","port":"5432"}`, ""},
 		{"wrong port", `{"username":"reader","password":"private-marker","port":5433}`, "port"},
 		{"wrong engine", `{"username":"reader","password":"private-marker","engine":"mysql"}`, "engine"},
 		{"invalid JSON", `{"password":"private-marker"`, "JSON"},
+		{"wrong string port", `{"username":"reader","password":"private-marker","port":"5433"}`, "port"},
 		{"invalid type", `{"username":"reader","password":"private-marker","port":"private-marker"}`, "JSON"},
 		{"null", `null`, "username"},
 	} {
