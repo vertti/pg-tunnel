@@ -154,7 +154,7 @@ func (s *SSM) localPort(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	if s.Report != nil {
-		s.Report(fmt.Sprintf("localhost:%d is already in use, probably by another pg-tunnel session; this session uses localhost:%d", s.LocalPort, port))
+		s.Report(fmt.Sprintf("127.0.0.1:%d is already in use, probably by another pg-tunnel session; this session uses 127.0.0.1:%d", s.LocalPort, port))
 	}
 	return port, nil
 }

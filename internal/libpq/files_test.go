@@ -274,7 +274,12 @@ func TestSharedPgpassOnlyForTheFixedPort(t *testing.T) {
 			require.NoError(t, client.Update(session.Credential{Secret: "replacement"}))
 			require.NoError(t, client.Close())
 			assert.NoFileExists(t, base.Pgpass)
-			assert.Empty(t, *reports)
+			if base.LocalPort == files(base).LocalPort {
+				require.Len(t, *reports, 1)
+				assert.Contains(t, (*reports)[0], "is not updated because port 15000 is taken")
+			} else {
+				assert.Empty(t, *reports)
+			}
 		})
 	}
 }

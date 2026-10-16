@@ -189,7 +189,7 @@ With a fixed `local_port`, which `init` sets, the session prints the address and
 a connection string:
 
 ```text
-pg-tunnel: Apps such as Postico can connect to host 127.0.0.1, port 15000, database "data", user "reader", SSL required, password left empty (~/.pgpass holds the current one). Connection string:
+pg-tunnel: Postico, notebooks and scripts in any terminal can connect to host 127.0.0.1, port 15000, database "data", user "reader", SSL required, password left empty (~/.pgpass holds the current one). Connection string:
   postgresql://reader@127.0.0.1:15000/data?sslmode=require
 ```
 
@@ -199,7 +199,8 @@ when the session ends. Your other lines stay unchanged. Use `127.0.0.1` rather
 than `localhost`, which clients may try over IPv6 first, where the tunnel does
 not listen. TLS encrypts these connections but cannot verify the database
 hostname; for full verification, paste the printed shell exports into another
-terminal instead. Ctrl-C closes `connect` and exits 0. GUI support depends on
+terminal and connect there without a host or password, for example with `psql` or
+`psycopg.connect("")`. Ctrl-C closes `connect` and exits 0. GUI support depends on
 the [client](compatibility.md).
 
 See [network recovery](recovery.md) and the [container recipe](containers.md)

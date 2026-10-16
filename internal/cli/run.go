@@ -185,7 +185,7 @@ func sessionCommand(command []string, stdout io.Writer, report func(string)) ses
 		if len(command) > 0 {
 			return process.Run(ctx, command, env)
 		}
-		report("Keep this window open; Ctrl-C closes the tunnel. For psql or scripts in another terminal with full TLS verification, paste these exports there:")
+		report("Keep this window open; Ctrl-C closes the tunnel. For full TLS verification in another terminal, paste these exports there and connect without a host or password, for example psql or psycopg.connect(\"\"):")
 		for _, entry := range env {
 			name, value, _ := strings.Cut(entry, "=")
 			if !strings.HasPrefix(name, "PG") {

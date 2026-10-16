@@ -62,10 +62,19 @@ func (f Files) Prepare(target session.Target, port int, credential session.Crede
 	if err = c.initialize(credential); err != nil {
 		return nil, errors.Join(err, c.Close())
 	}
-	if c.pgpass != "" && f.Report != nil {
-		f.Report(fmt.Sprintf("Apps such as Postico can connect to host 127.0.0.1, port %d, database %q, user %q, SSL required, password left empty (%s holds the current one). Connection string:\n  %s", port, c.target.Database, c.target.User, displayPath(c.pgpass), c.connectionString()))
+	if f.Report != nil {
+		f.reportSharing(c)
 	}
 	return c, nil
+}
+
+func (f Files) reportSharing(c *client) {
+	switch {
+	case c.pgpass != "":
+		f.Report(fmt.Sprintf("Postico, notebooks and scripts in any terminal can connect to host 127.0.0.1, port %d, database %q, user %q, SSL required, password left empty (%s holds the current one). Connection string:\n  %s", c.port, c.target.Database, c.target.User, displayPath(c.pgpass), c.connectionString()))
+	case f.Pgpass != "" && f.LocalPort != 0:
+		f.Report(fmt.Sprintf("%s is not updated because port %d is taken, so apps started elsewhere cannot connect with an empty password; stop whatever uses port %d and restart this session.", displayPath(f.Pgpass), f.LocalPort, f.LocalPort))
+	}
 }
 
 func (f Files) shares(port int) bool {
