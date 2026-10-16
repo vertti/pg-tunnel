@@ -130,7 +130,7 @@ func TestMissingConnectionNamesTheChoices(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(`{"profiles":{"prod":{},"dev":{}}}`), 0o600))
 	err := missing()
 	require.ErrorIs(t, err, cli.ErrUsage)
-	assert.EqualError(t, err, "connect needs a CONNECTION; available in "+path+": dev, prod")
+	assert.EqualError(t, err, "connect needs a CONNECTION; available: dev, prod")
 }
 
 func TestConnectionErrorsAreNotRewrapped(t *testing.T) {

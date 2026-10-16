@@ -127,7 +127,7 @@ func missingConnection(mode, path string) error {
 	case len(names) == 0:
 		return usageErr(fmt.Sprintf("%s needs a CONNECTION, but %s has none yet; create one with pg-tunnel init", mode, file))
 	}
-	return usageErr(fmt.Sprintf("%s needs a CONNECTION; available in %s: %s", mode, file, strings.Join(names, ", ")))
+	return usageErr(fmt.Sprintf("%s needs a CONNECTION; available: %s", mode, strings.Join(names, ", ")))
 }
 
 func execute(ctx context.Context, p *profile.Profile, command session.Command, report func(string), shareAnyPort bool) error {
