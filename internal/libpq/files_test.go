@@ -274,12 +274,31 @@ func TestSharedPgpassOnlyForTheFixedPort(t *testing.T) {
 			require.NoError(t, client.Update(session.Credential{Secret: "replacement"}))
 			require.NoError(t, client.Close())
 			assert.NoFileExists(t, base.Pgpass)
-			if base.LocalPort == files(base).LocalPort {
-				require.Len(t, *reports, 1)
-				assert.Contains(t, (*reports)[0], "is not updated because port 15000 is taken")
-			} else {
-				assert.Empty(t, *reports)
-			}
+			assert.Empty(t, *reports)
+		})
+	}
+}
+
+func TestAnyPortSharesPgpassForTheSessionPort(t *testing.T) {
+	t.Parallel()
+	for name, localPort := range map[string]int{"fallback port": 15000, "no fixed port": 0} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			files, reports := sharedFiles(t, "")
+			files.LocalPort, files.AnyPort = localPort, true
+			client, err := files.Prepare(target(), 15001, session.Credential{Secret: "token"})
+			require.NoError(t, err)
+			data, err := os.ReadFile(files.Pgpass)
+			require.NoError(t, err)
+			parsed, err := pgpassfile.ParsePassfile(strings.NewReader(string(data)))
+			require.NoError(t, err)
+			assert.Equal(t, "token", parsed.FindPassword("127.0.0.1", "15001", "data", "reader"))
+			require.Len(t, *reports, 1)
+			assert.Contains(t, (*reports)[0], "postgresql://reader@127.0.0.1:15001/data?sslmode=require")
+			require.NoError(t, client.Close())
+			data, err = os.ReadFile(files.Pgpass)
+			require.NoError(t, err)
+			assert.Empty(t, string(data))
 		})
 	}
 }

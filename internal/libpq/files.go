@@ -17,13 +17,16 @@ import (
 )
 
 // Files creates isolated libpq settings in a directory owned by the current user.
-// When a session gets its fixed LocalPort, it also keeps a block in the shared
-// Pgpass file so apps started outside the session can connect to localhost.
+// When a session gets its fixed LocalPort, or any port with AnyPort, it also keeps
+// a block in the shared Pgpass file so apps started outside the session can connect
+// to localhost.
 type Files struct {
 	Report    func(string)
 	Root      string
 	Pgpass    string
 	LocalPort int
+	// AnyPort shares Pgpass for whatever port the session gets.
+	AnyPort bool
 }
 
 // client holds an advisory lock until credential cleanup finishes.
@@ -62,23 +65,14 @@ func (f Files) Prepare(target session.Target, port int, credential session.Crede
 	if err = c.initialize(credential); err != nil {
 		return nil, errors.Join(err, c.Close())
 	}
-	if f.Report != nil {
-		f.reportSharing(c)
+	if c.pgpass != "" && f.Report != nil {
+		f.Report(fmt.Sprintf("Postico, notebooks and scripts in any terminal can connect to host 127.0.0.1, port %d, database %q, user %q, SSL required, password left empty (%s holds the current one). Connection string:\n  %s", port, c.target.Database, c.target.User, displayPath(c.pgpass), c.connectionString()))
 	}
 	return c, nil
 }
 
-func (f Files) reportSharing(c *client) {
-	switch {
-	case c.pgpass != "":
-		f.Report(fmt.Sprintf("Postico, notebooks and scripts in any terminal can connect to host 127.0.0.1, port %d, database %q, user %q, SSL required, password left empty (%s holds the current one). Connection string:\n  %s", c.port, c.target.Database, c.target.User, displayPath(c.pgpass), c.connectionString()))
-	case f.Pgpass != "" && f.LocalPort != 0:
-		f.Report(fmt.Sprintf("%s is not updated because port %d is taken, so apps started elsewhere cannot connect with an empty password; stop whatever uses port %d and restart this session.", displayPath(f.Pgpass), f.LocalPort, f.LocalPort))
-	}
-}
-
 func (f Files) shares(port int) bool {
-	return f.Pgpass != "" && f.LocalPort != 0 && port == f.LocalPort
+	return f.Pgpass != "" && (f.AnyPort || f.LocalPort != 0 && port == f.LocalPort)
 }
 
 func (c *client) initialize(credential session.Credential) error {
