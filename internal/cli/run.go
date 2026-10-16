@@ -25,7 +25,6 @@ import (
 	"github.com/vertti/pg-tunnel/internal/process"
 	"github.com/vertti/pg-tunnel/internal/profile"
 	"github.com/vertti/pg-tunnel/internal/session"
-	"github.com/vertti/pg-tunnel/internal/setup"
 )
 
 func runSession(ctx context.Context, mode string, args []string, stdout, stderr io.Writer) error {
@@ -56,13 +55,13 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 		return checkConnection(ctx, &p, stderr)
 	}
 	report := reporter(stderr)
-	return execute(ctx, &p, sessionCommand(command, stdout, report), report)
+	return execute(ctx, &p, sessionCommand(command, report), report, mode == "connect")
 }
 
 var verifyOnly session.Command = func(ctx context.Context, _ []string) error { return ctx.Err() }
 
 func checkConnection(ctx context.Context, p *profile.Profile, output io.Writer) error {
-	if err := execute(ctx, p, verifyOnly, reporter(output)); err != nil {
+	if err := execute(ctx, p, verifyOnly, reporter(output), false); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(output, "Connection check passed; local tunnel and temporary credentials cleaned up."); err != nil {
@@ -120,7 +119,7 @@ func sessionArguments(mode string, args []string) (name string, command []string
 	return name, rest[1:], nil
 }
 
-func execute(ctx context.Context, p *profile.Profile, command session.Command, report func(string)) error {
+func execute(ctx context.Context, p *profile.Profile, command session.Command, report func(string), shareAnyPort bool) error {
 	if p.Environment == profile.EnvironmentProduction {
 		report("WARNING: PRODUCTION connection. Database changes affect the production environment.")
 	}
@@ -142,7 +141,7 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	if err != nil {
 		return err
 	}
-	files.LocalPort, files.Report = p.LocalPort, report
+	files.LocalPort, files.AnyPort, files.Report = p.LocalPort, shareAnyPort, report
 	authentication, err := databaseAuth(p, &cfg, report)
 	if err != nil {
 		return err
@@ -178,23 +177,14 @@ func prepareRootCert(ctx context.Context, p *profile.Profile, region string, rep
 	return nil
 }
 
-// sessionCommand runs command, or for connect prints shell exports of the client
-// settings to stdout and waits; stopping connect with a signal is a normal exit.
-func sessionCommand(command []string, stdout io.Writer, report func(string)) session.Command {
+// sessionCommand runs command, or for connect waits; stopping connect with a
+// signal is a normal exit.
+func sessionCommand(command []string, report func(string)) session.Command {
 	return func(ctx context.Context, env []string) error {
 		if len(command) > 0 {
 			return process.Run(ctx, command, env)
 		}
-		report("Keep this window open; Ctrl-C closes the tunnel. For psql or scripts in another terminal with full TLS verification, paste these exports there:")
-		for _, entry := range env {
-			name, value, _ := strings.Cut(entry, "=")
-			if !strings.HasPrefix(name, "PG") {
-				continue
-			}
-			if _, err := fmt.Fprintf(stdout, "export %s=%s\n", name, setup.ShellQuote(value)); err != nil {
-				return fmt.Errorf("write client settings: %w", err)
-			}
-		}
+		report("Keep this window open; Ctrl-C closes the tunnel.")
 		<-ctx.Done()
 		return nil
 	}

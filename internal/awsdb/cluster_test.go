@@ -177,6 +177,6 @@ func TestBusyLocalPortFallsBackToAnAvailablePort(t *testing.T) {
 	used := api.input.Parameters["localPortNumber"][0]
 	assert.NotEqual(t, strconv.Itoa(port), used)
 	require.Len(t, reports, 1)
-	assert.Contains(t, reports[0], fmt.Sprintf("localhost:%d is already in use", port))
-	assert.Contains(t, reports[0], "this session uses localhost:"+used)
+	assert.Contains(t, reports[0], fmt.Sprintf("127.0.0.1:%d is already in use", port))
+	assert.Contains(t, reports[0], "this session uses 127.0.0.1:"+used)
 }

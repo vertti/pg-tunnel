@@ -52,7 +52,7 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	}
 	wizard := setup.Wizard{Input: terminalInput{fd: terminal, done: ctx.Done()}, Output: stderr, Config: cfg, AWSProfile: p.AWSProfile, RootCert: p.RootCert, Path: path}
 	wizard.Verify = func(verifyCtx context.Context, candidate *profile.Profile) error {
-		return execute(verifyCtx, candidate, verifyOnly, reporter(stderr))
+		return execute(verifyCtx, candidate, verifyOnly, reporter(stderr), false)
 	}
 	if err = wizard.Run(ctx); err != nil {
 		return fmt.Errorf("initialize connection: %w", err)
