@@ -39,7 +39,7 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 	if help, err := parseFlags(flags, args, stdout); help || err != nil {
 		return err
 	}
-	name, command, err := sessionArguments(mode, flags.Args())
+	name, command, err := sessionArguments(mode, path, flags.Args())
 	if err != nil {
 		return err
 	}
@@ -94,9 +94,9 @@ func configFlag(flags *flag.FlagSet, path *string, usage string) {
 	})
 }
 
-func sessionArguments(mode string, args []string) (name string, command []string, err error) {
+func sessionArguments(mode, path string, args []string) (name string, command []string, err error) {
 	if len(args) == 0 {
-		return "", nil, usageError(mode, "%s needs a CONNECTION name: pg-tunnel %s", mode, sessionSyntax[mode])
+		return "", nil, missingConnection(mode, path)
 	}
 	name, rest := args[0], args[1:]
 	if len(rest) > 0 && strings.HasPrefix(rest[0], "-") && rest[0] != "--" {
@@ -118,6 +118,17 @@ func sessionArguments(mode string, args []string) (name string, command []string
 		return "", nil, usageError(mode, "missing command after --")
 	}
 	return name, rest[1:], nil
+}
+
+func missingConnection(mode, path string) error {
+	file, names, err := profile.Names(path)
+	switch {
+	case err != nil:
+		return usageErr(fmt.Sprintf("%s needs a CONNECTION, but %v", mode, err))
+	case len(names) == 0:
+		return usageErr(fmt.Sprintf("%s needs a CONNECTION, but %s has none yet; create one with pg-tunnel init", mode, file))
+	}
+	return usageErr(fmt.Sprintf("%s needs a CONNECTION; available: %s", mode, strings.Join(names, ", ")))
 }
 
 func execute(ctx context.Context, p *profile.Profile, command session.Command, report func(string), shareAnyPort bool) error {

@@ -51,8 +51,8 @@ func TestUsageMistakesExplainTheFix(t *testing.T) {
 	}{
 		{"missing command", nil},
 		{`unknown command "bogus"`, []string{"bogus"}},
-		{"connect needs a CONNECTION name", []string{"connect"}},
-		{"check needs a CONNECTION name", []string{"check"}},
+		{"connect needs a CONNECTION", []string{"connect"}},
+		{"check needs a CONNECTION", []string{"check"}},
 		{"check takes only a CONNECTION name", []string{"check", "dev", "--", "psql"}},
 		{"put --config before the connection name", []string{"check", "dev", "--config", "other.json"}},
 		{"put -- between the connection name and the command: pg-tunnel run dev -- psql", []string{"run", "dev", "psql"}},
@@ -108,7 +108,6 @@ func TestUsageErrorsPointAtTheCommandHelp(t *testing.T) {
 	t.Parallel()
 	for args, want := range map[string]string{
 		"bogus":         `unknown command "bogus" (see pg-tunnel --help)`,
-		"connect":       "connect needs a CONNECTION name: pg-tunnel connect [--config PATH] CONNECTION (see pg-tunnel connect --help)",
 		"run dev":       "run needs a command: pg-tunnel run dev -- psql (see pg-tunnel run --help)",
 		"init dev":      "init takes no arguments; pass the AWS profile with --aws-profile (see pg-tunnel init --help)",
 		"cleanup extra": "cleanup takes no arguments (see pg-tunnel cleanup --help)",
@@ -117,6 +116,21 @@ func TestUsageErrorsPointAtTheCommandHelp(t *testing.T) {
 		require.ErrorIs(t, err, cli.ErrUsage)
 		assert.Equal(t, want, err.Error())
 	}
+}
+
+func TestMissingConnectionNamesTheChoices(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "pg-tunnel.json")
+	missing := func() error {
+		return cli.RunContext(t.Context(), []string{"connect", "--config", path}, io.Discard, io.Discard)
+	}
+	require.EqualError(t, missing(), "connect needs a CONNECTION, but open configuration "+path+": open "+path+": no such file or directory")
+	require.NoError(t, os.WriteFile(path, []byte(`{"profiles":{}}`), 0o600))
+	require.EqualError(t, missing(), "connect needs a CONNECTION, but "+path+" has none yet; create one with pg-tunnel init")
+	require.NoError(t, os.WriteFile(path, []byte(`{"profiles":{"prod":{},"dev":{}}}`), 0o600))
+	err := missing()
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.EqualError(t, err, "connect needs a CONNECTION; available: dev, prod")
 }
 
 func TestConnectionErrorsAreNotRewrapped(t *testing.T) {
