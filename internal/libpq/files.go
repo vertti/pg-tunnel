@@ -90,14 +90,15 @@ func (c *client) Update(credential session.Credential) error {
 	if credential.Secret == "" || strings.ContainsAny(credential.Secret, "\r\n\x00") {
 		return errors.New("credential is empty or contains unsupported control characters")
 	}
-	line := pgpassLine(c.target.Host, strconv.Itoa(c.port), c.target.Database, c.target.User, credential.Secret)
-	if err := atomicWrite(c.dir, "pgpass", line+"\n"); err != nil {
+	// The local lines keep a 127.0.0.1 connection string working when PGPASSFILE points here.
+	lines := append([]string{pgpassLine(c.target.Host, strconv.Itoa(c.port), c.target.Database, c.target.User, credential.Secret)}, c.localLines(credential.Secret)...)
+	if err := atomicWrite(c.dir, "pgpass", strings.Join(lines, "\n")+"\n"); err != nil {
 		return err
 	}
 	if c.pgpass == "" {
 		return nil
 	}
-	return editShared(c.pgpass, c.sharedLock(), filepath.Base(c.dir), c.sharedLines(credential.Secret))
+	return editShared(c.pgpass, c.sharedLock(), filepath.Base(c.dir), c.localLines(credential.Secret))
 }
 
 func (c *client) sharedLock() string { return filepath.Join(filepath.Dir(c.dir), "pgpass.lock") }

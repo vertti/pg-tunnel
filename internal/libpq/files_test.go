@@ -54,7 +54,9 @@ func TestPrivateFilesRefreshAndCleanup(t *testing.T) {
 	require.NoError(t, err)
 	parsed, err := pgpassfile.ParsePassfile(strings.NewReader(string(data)))
 	require.NoError(t, err)
-	assert.Equal(t, `token:with\escapes`, parsed.FindPassword("db.example", "15432", "data", "reader"))
+	for _, host := range []string{"db.example", "localhost", "127.0.0.1"} {
+		assert.Equal(t, `token:with\escapes`, parsed.FindPassword(host, "15432", "data", "reader"), host)
+	}
 	require.NoError(t, client.Update(session.Credential{Secret: "replacement"}))
 	data, err = os.ReadFile(passwordFile)
 	require.NoError(t, err)

@@ -14,8 +14,8 @@ import (
 	"github.com/vertti/pg-tunnel/internal/atomicfile"
 )
 
-// sharedLines returns the managed ~/.pgpass entries for clients that connect to localhost.
-func (c *client) sharedLines(secret string) []string {
+// localLines returns password entries for clients that connect to localhost.
+func (c *client) localLines(secret string) []string {
 	lines := make([]string, 0, 2)
 	for _, host := range []string{"localhost", "127.0.0.1"} {
 		lines = append(lines, pgpassLine(host, strconv.Itoa(c.port), c.target.Database, c.target.User, secret))
