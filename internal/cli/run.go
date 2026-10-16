@@ -15,6 +15,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -221,19 +222,30 @@ func awsConfig(ctx context.Context, p *profile.Profile) (aws.Config, error) {
 	}
 	// Discovery errors would otherwise blame IAM permissions for a missing login.
 	if _, err = cfg.Credentials.Retrieve(ctx); err != nil {
-		loginErr := fmt.Errorf("no usable AWS credentials; %s: %w", loginHint(&cfg), err)
-		return cfg, loginErr
+		err = credentialsError(&cfg, err)
+		return cfg, err
 	}
 	return cfg, nil
 }
 
-func loginHint(cfg *aws.Config) string {
+func credentialsError(cfg *aws.Config, err error) error {
+	var shared config.SharedConfig
 	for _, source := range cfg.ConfigSources {
-		if shared, ok := source.(config.SharedConfig); ok && (shared.SSOSessionName != "" || shared.SSOStartURL != "") {
-			return "AWS profile " + shared.Profile + " uses IAM Identity Center; log in with aws sso login --profile " + shared.Profile
+		if value, ok := source.(config.SharedConfig); ok {
+			shared = value
 		}
 	}
-	return "make AWS credentials available the way the AWS CLI finds them (environment, a named profile, or aws-vault) and select a profile with AWS_PROFILE or the connection's aws_profile if needed"
+	if shared.SSOSessionName != "" || shared.SSOStartURL != "" {
+		return fmt.Errorf("no usable AWS credentials; AWS profile %s uses IAM Identity Center; log in with aws sso login --profile %s: %w", shared.Profile, shared.Profile, err)
+	}
+	// The SDK falls back to the EC2 instance role only when nothing else configures credentials.
+	if aws.IsCredentialsProvider(cfg.Credentials, &ec2rolecreds.Provider{}) {
+		if shared.Profile != "" && shared.Profile != "default" {
+			return fmt.Errorf("AWS profile %s has no credentials (aws configure list --profile %s)", shared.Profile, shared.Profile)
+		}
+		return errors.New("no AWS credentials found; select an AWS profile with the connection's aws_profile or AWS_PROFILE (aws configure list-profiles)")
+	}
+	return fmt.Errorf("no usable AWS credentials; make AWS credentials available the way the AWS CLI finds them (environment, a named profile, or aws-vault): %w", err)
 }
 
 func environmentExpiry() (time.Time, error) {
