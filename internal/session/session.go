@@ -151,6 +151,7 @@ const (
 func (r *Runner) refresh(ctx context.Context, target Target, port int, client Client, current Credential) {
 	due := r.renewalTime(current)
 	backoff := 5 * time.Second
+	failure := ""
 	for {
 		if !sleepUntil(ctx, due) {
 			return
@@ -161,9 +162,16 @@ func (r *Runner) refresh(ctx context.Context, target Target, port int, client Cl
 		}
 		if err != nil {
 			due = time.Now().Round(0).Add(backoff)
-			r.report(fmt.Sprintf("Credential refresh failed: %v. %s Retry in %s.", err, credentialValidity(current), backoff))
+			if err.Error() != failure {
+				failure = err.Error()
+				r.report(fmt.Sprintf("Credential refresh failed: %v. %s pg-tunnel keeps retrying and reports when refresh recovers.", err, credentialValidity(current)))
+			}
 			backoff = min(backoff*2, time.Minute)
 			continue
+		}
+		if failure != "" {
+			failure = ""
+			r.report("Credential refresh recovered.")
 		}
 		rotated := next.Secret != current.Secret
 		current = next
@@ -199,13 +207,14 @@ func (r *Runner) renew(ctx context.Context, target Target, port int, client Clie
 	defer cancel()
 	credential, err := r.Auth.Credential(refreshCtx, target)
 	if err != nil {
-		return Credential{}, fmt.Errorf("obtain replacement credential: %w", err)
+		return Credential{}, err //nolint:wrapcheck // The refresh report already says a credential refresh failed.
 	}
 	if credential.ExpiresAt.IsZero() && current.ExpiresAt.IsZero() && credential.Secret == current.Secret {
 		return credential, nil
 	}
-	if err = r.Verify(refreshCtx, target, port, credential, nil); err != nil {
-		return Credential{}, fmt.Errorf("verify replacement credential; previous credential retained: %w", err)
+	err = r.Verify(refreshCtx, target, port, credential, nil)
+	if err != nil {
+		return Credential{}, err
 	}
 	if err = client.Update(credential); err != nil {
 		return Credential{}, fmt.Errorf("publish replacement credential: %w", err)
@@ -255,7 +264,7 @@ func createdAt(credential Credential) string {
 
 func credentialValidity(credential Credential) string {
 	if credential.ExpiresAt.IsZero() {
-		return "The previous password is still published; it may no longer be valid after rotation."
+		return "New connections keep using the current password until refresh succeeds."
 	}
-	return "Last published token expires " + credential.ExpiresAt.Format(time.RFC3339) + "; expiry does not close established connections."
+	return "New connections keep using the current token until it expires at " + credential.ExpiresAt.Format(time.RFC3339) + "; open connections are unaffected."
 }

@@ -67,13 +67,17 @@ func TestDatabaseAuthSelectsConfiguredMode(t *testing.T) {
 
 	auth, err := databaseAuth(&profile.Profile{Auth: profile.AuthSecretsManager, SecretID: "chosen"}, &cfg, nil)
 	require.NoError(t, err)
-	secrets, ok := auth.(awsdb.Secrets)
+	checked, ok := auth.(loginCheckedAuth)
+	require.True(t, ok)
+	secrets, ok := checked.Auth.(awsdb.Secrets)
 	require.True(t, ok)
 	assert.Equal(t, "chosen", secrets.ID)
 
 	auth, err = databaseAuth(&profile.Profile{}, &cfg, nil)
 	require.NoError(t, err)
-	iam, ok := auth.(*awsdb.IAM)
+	checked, ok = auth.(loginCheckedAuth)
+	require.True(t, ok)
+	iam, ok := checked.Auth.(*awsdb.IAM)
 	require.True(t, ok)
 	assert.Equal(t, "eu-central-1", iam.Region)
 

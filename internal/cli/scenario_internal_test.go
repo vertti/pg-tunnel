@@ -2,11 +2,14 @@ package cli
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -43,6 +46,9 @@ func newScenario(t *testing.T) *scenario {
 	t.Setenv("AWS_ACCESS_KEY_ID", "test")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
 	t.Setenv("AWS_ENDPOINT_URL", server.URL)
+	t.Setenv("AWS_ENDPOINT_URL_SSO", server.URL)
+	// Any request that bypasses the fake fails instead of reaching AWS.
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
 	t.Setenv("AWS_MAX_ATTEMPTS", "1")
 	configureRunner = func(runner *session.Runner) {
 		if !s.ssm {
@@ -52,6 +58,29 @@ func newScenario(t *testing.T) *scenario {
 	}
 	t.Cleanup(func() { configureRunner = func(*session.Runner) {} })
 	return s
+}
+
+// ssoLogin points p at an IAM Identity Center profile and returns a function
+// that sets when its cached login expires.
+func (s *scenario) ssoLogin(p *profile.Profile) (expireAt func(time.Time)) {
+	s.t.Helper()
+	s.t.Setenv("AWS_ACCESS_KEY_ID", "")
+	s.t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	start := "https://scenario.awsapps.com/start"
+	config := "[profile dev]\nregion = eu-west-1\nsso_start_url = " + start + "\nsso_region = eu-west-1\nsso_account_id = 123456789012\nsso_role_name = Developer\n"
+	require.NoError(s.t, os.WriteFile(os.Getenv("AWS_CONFIG_FILE"), []byte(config), 0o600))
+	p.AWSProfile = "dev"
+	home, err := os.UserHomeDir()
+	require.NoError(s.t, err)
+	sum := sha1.Sum([]byte(start))
+	cache := filepath.Join(home, ".aws", "sso", "cache", hex.EncodeToString(sum[:])+".json")
+	require.NoError(s.t, os.MkdirAll(filepath.Dir(cache), 0o700))
+	expireAt = func(expiry time.Time) {
+		token := `{"accessToken":"token","expiresAt":"` + expiry.UTC().Format(time.RFC3339) + `","region":"eu-west-1","startUrl":"` + start + `"}`
+		require.NoError(s.t, os.WriteFile(cache, []byte(token), 0o600))
+	}
+	expireAt(time.Now().Add(time.Hour))
+	return expireAt
 }
 
 func (s *scenario) secretsManagerProfile() *profile.Profile {
@@ -81,6 +110,7 @@ func (s *scenario) start(p *profile.Profile) {
 	select {
 	case <-ready:
 	case err := <-result:
+		result <- err
 		s.t.Fatalf("session ended before its command started: %v\n%s", err, s.output())
 	case <-time.After(30 * time.Second):
 		s.t.Fatalf("session did not start\n%s", s.output())
@@ -191,6 +221,9 @@ func deniedMessage(action string) string {
 
 // action names a request the way IAM does, such as rds:DescribeDBInstances.
 func action(r *http.Request) string {
+	if r.URL.Path == "/federation/credentials" {
+		return "sso:GetRoleCredentials"
+	}
 	scope := strings.Split(strings.SplitN(r.Header.Get("Authorization"), "Credential=", 2)[1], "/")
 	service := scope[3]
 	if target := r.Header.Get("X-Amz-Target"); target != "" {
@@ -261,6 +294,9 @@ func (f *fakeAWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch operation {
+	case "sso:GetRoleCredentials":
+		expires := time.Now().Add(2 * time.Second).UnixMilli()
+		writeAWSJSON(f.t, w, http.StatusOK, map[string]any{"roleCredentials": map[string]any{"accessKeyId": "sso", "secretAccessKey": "sso", "sessionToken": "sso", "expiration": expires}})
 	case "secretsmanager:GetSecretValue":
 		f.mu.Lock()
 		secret, err := json.Marshal(map[string]string{"username": "postgres", "password": f.password})
@@ -292,7 +328,7 @@ func TestScenarioSecretRotation(t *testing.T) {
 	require.NoError(t, s.psql("SELECT 1"), "new connections use the rotated password")
 
 	s.aws.rotateSecret("rotated-twice")
-	s.waitForMessage("previous password is still published")
+	s.waitForMessage("New connections keep using the current password")
 	require.NoError(t, s.psql("SELECT 1"), "a password the database rejects is never published")
 	s.setDatabasePassword("rotated-twice")
 	s.waitForMessage("Secrets Manager password rotated (created 2026-10-17T12:02:00Z)")
@@ -361,4 +397,34 @@ func TestScenarioAWSFailuresAtStartup(t *testing.T) {
 			assert.EqualError(t, s.fail(p), tc.want)
 		})
 	}
+}
+
+func TestScenarioSSOLoginExpiresMidSession(t *testing.T) {
+	s := newScenario(t)
+	p := s.secretsManagerProfile()
+	expireAt := s.ssoLogin(p)
+	s.start(p)
+	expireAt(time.Now().Add(-time.Minute))
+	s.waitForMessage("Credential refresh failed: AWS SSO login for profile dev has expired; run aws sso login --profile dev. New connections keep using the current password until refresh succeeds. pg-tunnel keeps retrying and reports when refresh recovers.")
+	require.NoError(t, s.psql("SELECT 1"))
+	expireAt(time.Now().Add(time.Hour))
+	s.waitForMessage("Credential refresh recovered.")
+	assert.Equal(t, 1, strings.Count(s.output(), "Credential refresh failed"), "an unchanged failure is reported once")
+}
+
+func TestScenarioSecretAccessLostMidSession(t *testing.T) {
+	s := newScenario(t)
+	s.start(s.secretsManagerProfile())
+	s.aws.deny("secretsmanager:GetSecretValue")
+	s.waitForMessage(`Credential refresh failed: Secrets Manager GetSecretValue for "db-secret" was denied (AccessDeniedException); the AWS role needs secretsmanager:GetSecretValue on the secret, and kms:Decrypt if it uses a customer-managed key. New connections keep using the current password until refresh succeeds.`)
+	require.NoError(t, s.psql("SELECT 1"))
+	s.aws.fail("secretsmanager:GetSecretValue", "", "")
+	s.waitForMessage("Credential refresh recovered.")
+}
+
+func TestScenarioSecretPasswordRejectedAtStartup(t *testing.T) {
+	s := newScenario(t)
+	s.aws.rotateSecret("not-the-database-password")
+	err := s.fail(s.secretsManagerProfile())
+	assert.EqualError(t, err, `database session: verify database authentication: database rejected login: password authentication failed for user "postgres"; check that the secret's password matches the database; users with rds_iam must use IAM authentication`)
 }

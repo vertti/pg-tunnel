@@ -31,7 +31,7 @@ func TestVerifySCRAMWithPostgresAndIgnoresAmbientSettings(t *testing.T) {
 	}
 	require.NoError(t, libpq.Verify(t.Context(), target, port, session.Credential{Secret: postgresPassword}, nil))
 	err := libpq.Verify(t.Context(), target, port, session.Credential{Secret: "rejected-password"}, nil)
-	require.ErrorContains(t, err, "TLS/database connection failed")
+	require.EqualError(t, err, `database rejected login: password authentication failed for user "postgres"; check that the secret's password matches the database; users with rds_iam must use IAM authentication`)
 	assert.NotContains(t, err.Error(), "rejected-password")
 	var warnings []string
 	require.NoError(t, libpq.Verify(t.Context(), target, port, session.Credential{Secret: postgresPassword}, func(message string) { warnings = append(warnings, message) }))
