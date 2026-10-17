@@ -16,8 +16,8 @@ verification.
 | JupyterLab 4.6.3 + psycopg2 | [Launch the server through pg-tunnel](usage.md#client-behavior) | Works | Not separately tested in Jupyter |
 | Go pgx / pgxpool 5.11.0 | [Connection hook below](#go-pgx-pools) | Works with hook | Works with hook |
 | psql 18.6 in Docker Desktop | [Run both in the same container](containers.md) | Works | Works |
-| Postico 2.3.3 | [Printed host and port, empty password](usage.md#client-behavior); tested with `localhost` | Works | Works |
-| psql 18.6, SQLAlchemy 2.0.54 + psycopg2 2.9.13 | Printed connection string with `connect` running; tested with `localhost` | Works | psql works |
+| Postico 2.3.3 | [Printed host and port, empty password](usage.md#client-behavior) | Works | Works |
+| psql 18.6, SQLAlchemy 2.0.54 + psycopg2 2.9.13 | Printed connection string with `connect` running | Works | psql works |
 | pgJDBC 42.7.13 | [JDBC limitations below](#dbeaver-and-jdbc) | No working recipe | Not tested |
 | DBeaver 26.2.1 | Uses JDBC | GUI not tested | Not tested |
 

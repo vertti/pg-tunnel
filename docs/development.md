@@ -28,8 +28,8 @@ Coverage must meet the floor in `mise.toml`.
 For client changes, update the [compatibility list](compatibility.md) with tested
 versions and setup. Verify TLS hostname checking, a fresh login after credential
 renewal, independent simultaneous sessions, and cleanup. Keep detailed test
-results in the PR, and working notes in gitignored `PLAN.md`; public docs should
-explain usage and current support rather than recount individual runs.
+results in the PR; public docs should explain usage and current support rather
+than recount individual runs.
 
 ## Architecture
 

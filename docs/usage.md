@@ -165,13 +165,7 @@ connection strings can override these settings; `DATABASE_URL` is not rewritten.
 Go pgx pools need the [connection hook](compatibility.md#go-pgx-pools).
 
 Launch a notebook server through `pg-tunnel run development -- uv run jupyter lab`,
-then connect from a notebook:
-
-```python
-import psycopg
-
-conn = psycopg.connect("")
-```
+then connect from a notebook with `psycopg.connect("")`.
 
 Notebooks in one Lab server share a tunnel. Each separately launched Lab server,
 such as one per worktree, gets its own tunnel and credentials. Restarting a
@@ -232,3 +226,16 @@ pg-tunnel cleanup
 
 Secrets Manager passwords do not expire automatically, so clean up after an
 uncatchable termination. The client's own descendants may need separate termination.
+
+## Troubleshooting
+
+| Message contains | Fix |
+| --- | --- |
+| `AWS SSO login for profile … has expired` | Run the `aws sso login --profile …` command it prints. A running session picks up the new login on its next refresh. |
+| `… was denied: …` | Your AWS identity lacks the permission AWS names; see [AWS access](#aws-access). |
+| `… is not connected` or `online in SSM` | The jump host is not registered with SSM. Check it is running and listed by `aws ssm describe-instance-information`. |
+| `database rejected login` | For Secrets Manager, the secret's password does not match the database. Users with `rds_iam` must use IAM authentication; for IAM, check `rds-db:connect` and the `rds_iam` grant. |
+| `Credential refresh failed` | The current credential stays in use while pg-tunnel retries; fix the cause the message names. |
+
+After a secret rotation, new connections can fail for up to five minutes until
+pg-tunnel reads the new password; open connections are unaffected.
