@@ -30,8 +30,8 @@ type Secrets struct {
 func (s Secrets) Credential(ctx context.Context, target session.Target) (session.Credential, error) {
 	output, err := s.API.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{SecretId: aws.String(s.ID), VersionStage: aws.String("AWSCURRENT")})
 	if err != nil {
-		if ctx.Err() != nil {
-			return session.Credential{}, fmt.Errorf("Secrets Manager request cancelled: %w", ctx.Err())
+		if problem, ok := transportProblem(err); ok {
+			return session.Credential{}, &callError{text: fmt.Sprintf("Secrets Manager GetSecretValue for %q %s", s.ID, problem), err: err}
 		}
 		// Do not expose response bodies or decoder errors, which can contain secret data.
 		var apiError smithy.APIError

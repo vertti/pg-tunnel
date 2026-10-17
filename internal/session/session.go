@@ -78,13 +78,15 @@ type Runner struct {
 	Command   Command
 	Report    func(string)
 	Env       []string
-	// PasswordPoll of zero checks every 5 minutes.
-	PasswordPoll time.Duration
+	// Zero durations use the defaults: polls every 5 minutes, a 1-minute startup and 30-second refreshes.
+	PasswordPoll   time.Duration
+	StartupTimeout time.Duration
+	RefreshTimeout time.Duration
 }
 
 // Run starts a database session, runs its command, and closes every resource.
 func (r *Runner) Run(ctx context.Context) (result error) {
-	startupCtx, startupCancel := context.WithTimeout(ctx, time.Minute)
+	startupCtx, startupCancel := context.WithTimeout(ctx, orDefault(r.StartupTimeout, time.Minute))
 	defer startupCancel()
 	target := r.Target
 	r.report(fmt.Sprintf("Database: %s:%d (%s, user %s)", target.Host, target.Port, target.Database, target.User))
@@ -203,7 +205,7 @@ func sleepUntil(ctx context.Context, due time.Time) bool {
 }
 
 func (r *Runner) renew(ctx context.Context, target Target, port int, client Client, current Credential) (Credential, error) {
-	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	refreshCtx, cancel := context.WithTimeout(ctx, orDefault(r.RefreshTimeout, 30*time.Second))
 	defer cancel()
 	credential, err := r.Auth.Credential(refreshCtx, target)
 	if err != nil {
@@ -222,11 +224,15 @@ func (r *Runner) renew(ctx context.Context, target Target, port int, client Clie
 	return credential, nil
 }
 
-func (r *Runner) passwordPoll() time.Duration {
-	if r.PasswordPoll > 0 {
-		return r.PasswordPoll
+func orDefault(value, fallback time.Duration) time.Duration {
+	if value > 0 {
+		return value
 	}
-	return defaultPasswordPoll
+	return fallback
+}
+
+func (r *Runner) passwordPoll() time.Duration {
+	return orDefault(r.PasswordPoll, defaultPasswordPoll)
 }
 
 func (r *Runner) renewalTime(credential Credential) time.Time {

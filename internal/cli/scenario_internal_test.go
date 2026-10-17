@@ -40,9 +40,10 @@ type scenario struct {
 func newScenario(t *testing.T) *scenario {
 	t.Helper()
 	isolateAWS(t)
-	s := &scenario{t: t, postgres: testutil.StartPostgres(t), aws: &fakeAWS{t: t, password: testutil.PostgresPassword}}
+	s := &scenario{t: t, postgres: testutil.StartPostgres(t), aws: &fakeAWS{t: t, password: testutil.PostgresPassword, released: make(chan struct{})}}
 	server := httptest.NewServer(s.aws)
 	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(s.aws.released) })
 	t.Setenv("AWS_ACCESS_KEY_ID", "test")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
 	t.Setenv("AWS_ENDPOINT_URL", server.URL)
@@ -55,8 +56,14 @@ func newScenario(t *testing.T) *scenario {
 			runner.Transport = directTransport{port: s.postgres.Port}
 		}
 		runner.PasswordPoll = 200 * time.Millisecond
+		runner.StartupTimeout = 3 * time.Second
+		runner.RefreshTimeout = time.Second
 	}
-	t.Cleanup(func() { configureRunner = func(*session.Runner) {} })
+	setupTimeout = 2 * time.Second
+	t.Cleanup(func() {
+		configureRunner = func(*session.Runner) {}
+		setupTimeout = 30 * time.Second
+	})
 	return s
 }
 
@@ -197,6 +204,18 @@ type fakeAWS struct {
 	password string
 	version  int
 	failures map[string]awsFailure
+	hanging  map[string]bool
+	released chan struct{}
+}
+
+// hang makes calls of action wait until the client gives up.
+func (f *fakeAWS) hang(action string, hanging bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.hanging == nil {
+		f.hanging = map[string]bool{}
+	}
+	f.hanging[action] = hanging
 }
 
 type awsFailure struct{ code, message string }
@@ -288,7 +307,15 @@ func (f *fakeAWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	operation := action(r)
 	f.mu.Lock()
 	failure, failing := f.failures[operation]
+	hanging := f.hanging[operation]
 	f.mu.Unlock()
+	if hanging {
+		select {
+		case <-r.Context().Done():
+		case <-f.released:
+		}
+		return
+	}
 	if failing && failure.code != "" {
 		writeAWSError(f.t, w, operation, failure)
 		return
@@ -427,4 +454,45 @@ func TestScenarioSecretPasswordRejectedAtStartup(t *testing.T) {
 	s.aws.rotateSecret("not-the-database-password")
 	err := s.fail(s.secretsManagerProfile())
 	assert.EqualError(t, err, `database session: verify database authentication: database rejected login: password authentication failed for user "postgres"; check that the secret's password matches the database; users with rds_iam must use IAM authentication`)
+}
+
+const networkHint = ". Check network access to AWS (VPN, proxy, firewall)"
+
+func TestScenarioAWSUnresponsiveAtStartup(t *testing.T) {
+	for _, tc := range []struct {
+		action string
+		setup  func(*scenario, *profile.Profile)
+		want   string
+	}{
+		{"ec2:DescribeInstances", func(_ *scenario, p *profile.Profile) { p.Target, p.JumpTag = "", "bastion" }, `discover jump host in eu-west-1: EC2 DescribeInstances for Name="bastion" timed out`},
+		{"rds:DescribeDBInstances", func(_ *scenario, p *profile.Profile) { p.Host, p.DBInstance = "", "app-db" }, `discover database: RDS DescribeDBInstances for "app-db" in eu-west-1 timed out`},
+		{"ssm:StartSession", func(s *scenario, _ *profile.Profile) { s.ssm = true }, "database session: open tunnel: SSM StartSession for i-scenario timed out"},
+		{"secretsmanager:GetSecretValue", func(*scenario, *profile.Profile) {}, `database session: obtain database credential: Secrets Manager GetSecretValue for "db-secret" timed out`},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			s := newScenario(t)
+			p := s.secretsManagerProfile()
+			tc.setup(s, p)
+			s.aws.hang(tc.action, true)
+			assert.EqualError(t, s.fail(p), tc.want+networkHint)
+		})
+	}
+}
+
+func TestScenarioAWSUnreachableAtStartup(t *testing.T) {
+	s := newScenario(t)
+	t.Setenv("AWS_ENDPOINT_URL", "http://127.0.0.1:1")
+	p := s.secretsManagerProfile()
+	p.Host, p.DBInstance = "", "app-db"
+	assert.EqualError(t, s.fail(p), `discover database: RDS DescribeDBInstances for "app-db" in eu-west-1 could not reach AWS: dial tcp 127.0.0.1:1: connect: connection refused`+networkHint)
+}
+
+func TestScenarioAWSUnresponsiveMidSession(t *testing.T) {
+	s := newScenario(t)
+	s.start(s.secretsManagerProfile())
+	s.aws.hang("secretsmanager:GetSecretValue", true)
+	s.waitForMessage(`Credential refresh failed: Secrets Manager GetSecretValue for "db-secret" timed out` + networkHint + ". New connections keep using the current password until refresh succeeds.")
+	require.NoError(t, s.psql("SELECT 1"))
+	s.aws.hang("secretsmanager:GetSecretValue", false)
+	s.waitForMessage("Credential refresh recovered.")
 }
