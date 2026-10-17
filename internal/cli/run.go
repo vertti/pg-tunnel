@@ -79,7 +79,7 @@ func reporter(output io.Writer) func(string) {
 	return func(message string) { logger.Print(message) }
 }
 
-const setupTimeout = 30 * time.Second
+var setupTimeout = 30 * time.Second
 
 // configureRunner lets scenario tests replace the SSM transport and shorten polling.
 var configureRunner = func(*session.Runner) {}
