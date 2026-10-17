@@ -17,6 +17,7 @@ import (
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/ssm/types"
+	"github.com/aws/smithy-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -296,7 +297,7 @@ func TestRDSDiscoveryRejectsUnusableInstances(t *testing.T) {
 		name, want string
 		instances  []rdstypes.DBInstance
 	}{
-		{name: "API failure", err: errors.New("AccessDenied"), want: "rds:DescribeDBInstances permission"},
+		{name: "API failure", err: &smithy.GenericAPIError{Code: "DBInstanceNotFound", Message: "DBInstance example not found."}, want: "failed: DBInstance example not found. Check the instance name"},
 		{name: "no instance", want: "found 0"},
 		{name: "other engine", instances: []rdstypes.DBInstance{{Engine: aws.String("mysql")}}, want: "Aurora PostgreSQL instances are supported"},
 		{name: "no endpoint", instances: []rdstypes.DBInstance{{Engine: aws.String("postgres"), IAMDatabaseAuthenticationEnabled: aws.Bool(true)}}, want: "usable database endpoint"},
