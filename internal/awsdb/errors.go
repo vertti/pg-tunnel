@@ -57,7 +57,7 @@ func transportProblem(err error) (string, bool) {
 	case errors.Is(err, context.DeadlineExceeded):
 		return "timed out. " + networkHint, true
 	case errors.Is(err, context.Canceled):
-		return "was cancelled", true
+		return "was canceled", true
 	case errors.As(err, &urlError):
 		return "could not reach AWS: " + urlError.Err.Error() + ". " + networkHint, true
 	}

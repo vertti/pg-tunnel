@@ -57,10 +57,7 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	wizard.Verify = func(verifyCtx context.Context, candidate *profile.Profile) error {
 		return execute(verifyCtx, candidate, verifyOnly, reporter(stderr), false)
 	}
-	if err = wizard.Run(ctx); err != nil {
-		return fmt.Errorf("initialize connection: %w", err)
-	}
-	return nil
+	return wizard.Run(ctx) //nolint:wrapcheck // Wizard errors name the step that failed.
 }
 
 // terminalInput selects on /dev/tty because Go cannot poll it on macOS;

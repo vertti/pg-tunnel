@@ -237,11 +237,11 @@ func (p *Profile) validateOptions() error {
 	switch p.Auth {
 	case "", AuthIAM:
 		if p.SecretID != "" {
-			return errors.New("secret_id requires auth=secrets-manager; IAM is the default")
+			return errors.New(`secret_id requires "auth": "secrets-manager"; IAM is the default`)
 		}
 	case AuthSecretsManager:
 		if p.SecretID == "" {
-			return errors.New("auth=secrets-manager requires secret_id (secret name or full ARN)")
+			return errors.New(`"auth": "secrets-manager" requires secret_id (secret name or full ARN)`)
 		}
 	default:
 		return errors.New("auth must be iam or secrets-manager")
