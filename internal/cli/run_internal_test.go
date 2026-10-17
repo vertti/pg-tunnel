@@ -101,7 +101,7 @@ func TestMissingAWSLoginNamesTheFix(t *testing.T) {
 	_, err := awsConfig(t.Context(), &profile.Profile{AWSProfile: "dev"})
 	require.ErrorContains(t, err, "aws sso login --profile dev")
 	_, err = awsConfig(t.Context(), &profile.Profile{Region: "eu-west-1"})
-	require.EqualError(t, err, "no AWS credentials found; select an AWS profile with the connection's aws_profile or AWS_PROFILE (aws configure list-profiles)")
+	require.ErrorIs(t, err, errNoAWSCredentials)
 	_, err = awsConfig(t.Context(), &profile.Profile{AWSProfile: "keys"})
 	require.EqualError(t, err, "AWS profile keys has no credentials (aws configure list --profile keys)")
 	_, err = awsConfig(t.Context(), &profile.Profile{AWSProfile: "broken"})
@@ -159,6 +159,15 @@ func TestProductionWarningBeforeConnection(t *testing.T) {
 		require.ErrorContains(t, err, `load AWS profile "missing-test-profile"; check it exists (aws configure list-profiles)`)
 		assert.Equal(t, environment == "production", strings.Contains(output.String(), "WARNING: PRODUCTION"))
 	}
+}
+
+func TestConnectWithoutCredentialsNamesTheFix(t *testing.T) {
+	isolateAWS(t)
+	path := filepath.Join(t.TempDir(), "config.json")
+	p := profile.Profile{DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432, Region: "eu-west-1"}
+	require.NoError(t, profile.Save(path, "test", &p))
+	err := RunContext(t.Context(), []string{"connect", "--config", path, "test"}, io.Discard, io.Discard)
+	require.EqualError(t, err, "no AWS credentials found; rerun with AWS_PROFILE=<profile>, or set aws_profile for this connection")
 }
 
 func TestCleanupRemovesAbandonedSessions(t *testing.T) {

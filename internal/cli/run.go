@@ -59,6 +59,8 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 	return execute(ctx, &p, sessionCommand(command, report), report, mode == "connect")
 }
 
+var errNoAWSCredentials = errors.New("no AWS credentials found")
+
 var verifyOnly session.Command = func(ctx context.Context, _ []string) error { return ctx.Err() }
 
 func checkConnection(ctx context.Context, p *profile.Profile, output io.Writer) error {
@@ -138,6 +140,9 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	setupCtx, cancel := context.WithTimeout(ctx, setupTimeout)
 	defer cancel()
 	cfg, err := awsConfig(setupCtx, p)
+	if errors.Is(err, errNoAWSCredentials) {
+		return fmt.Errorf("%w; rerun with AWS_PROFILE=<profile>, or set aws_profile for this connection", err)
+	}
 	if err != nil {
 		return err
 	}
@@ -243,7 +248,7 @@ func credentialsError(cfg *aws.Config, err error) error {
 		if shared.Profile != "" && shared.Profile != "default" {
 			return fmt.Errorf("AWS profile %s has no credentials (aws configure list --profile %s)", shared.Profile, shared.Profile)
 		}
-		return errors.New("no AWS credentials found; select an AWS profile with the connection's aws_profile or AWS_PROFILE (aws configure list-profiles)")
+		return errNoAWSCredentials
 	}
 	return fmt.Errorf("no usable AWS credentials; make AWS credentials available the way the AWS CLI finds them (environment, a named profile, or aws-vault): %w", err)
 }
