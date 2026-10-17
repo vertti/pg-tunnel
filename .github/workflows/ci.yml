@@ -25,6 +25,7 @@ jobs:
       - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: "2026.9.15"
+          persist_github_token: true # Later mise steps resolve GitHub-hosted tools.
           cache_save: ${{ github.event_name == 'push' }} # Pull requests restore caches saved on main.
       - id: go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
