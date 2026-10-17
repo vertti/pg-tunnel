@@ -231,13 +231,13 @@ func sharedFiles(t *testing.T, existing string) (files libpq.Files, reports *[]s
 	return libpq.Files{Root: filepath.Join(directory, "sessions"), Pgpass: pgpass, LocalPort: 15000, Report: func(message string) { *reports = append(*reports, message) }}, reports
 }
 
-func sharedPassword(t *testing.T, path, host string) string {
+func sharedPassword(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	parsed, err := pgpassfile.ParsePassfile(strings.NewReader(string(data)))
 	require.NoError(t, err)
-	return parsed.FindPassword(host, "15000", "data", "reader")
+	return parsed.FindPassword("127.0.0.1", "15000", "data", "reader")
 }
 
 func TestSharedPgpassFollowsSessionAndKeepsOtherLines(t *testing.T) {
@@ -246,7 +246,7 @@ func TestSharedPgpassFollowsSessionAndKeepsOtherLines(t *testing.T) {
 	files, reports := sharedFiles(t, own)
 	client, err := files.Prepare(target(), 15000, session.Credential{Secret: `token:with\escapes`})
 	require.NoError(t, err)
-	assert.Equal(t, `token:with\escapes`, sharedPassword(t, files.Pgpass, "127.0.0.1"), "the managed block wins over older lines")
+	assert.Equal(t, `token:with\escapes`, sharedPassword(t, files.Pgpass), "the managed block wins over older lines")
 	info, err := os.Stat(files.Pgpass)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
@@ -254,7 +254,7 @@ func TestSharedPgpassFollowsSessionAndKeepsOtherLines(t *testing.T) {
 	assert.Contains(t, (*reports)[0], "host 127.0.0.1, port 15000")
 	assert.Contains(t, (*reports)[0], "postgresql://reader@127.0.0.1:15000/data?sslmode=require")
 	require.NoError(t, client.Update(session.Credential{Secret: "replacement"}))
-	assert.Equal(t, "replacement", sharedPassword(t, files.Pgpass, "127.0.0.1"))
+	assert.Equal(t, "replacement", sharedPassword(t, files.Pgpass))
 	require.NoError(t, client.Close())
 	data, err := os.ReadFile(files.Pgpass)
 	require.NoError(t, err)
@@ -315,7 +315,7 @@ func TestSharedPgpassWritesThroughSymlink(t *testing.T) {
 	info, err := os.Lstat(files.Pgpass)
 	require.NoError(t, err)
 	assert.Equal(t, os.ModeSymlink, info.Mode().Type())
-	assert.Equal(t, "token", sharedPassword(t, target, "127.0.0.1"))
+	assert.Equal(t, "token", sharedPassword(t, target))
 	require.NoError(t, client.Close())
 }
 
@@ -332,7 +332,22 @@ func TestRecoveryRemovesSharedBlocksOfDeadSessionsOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "session-dead")
 	assert.Contains(t, string(data), "other:5432:*:me:mine\n")
-	assert.Equal(t, "token", sharedPassword(t, files.Pgpass, "127.0.0.1"))
+	assert.Equal(t, "token", sharedPassword(t, files.Pgpass))
+}
+
+func TestRecoveryRemovesPasswordCopiesLeftByAKilledWrite(t *testing.T) {
+	t.Parallel()
+	files, _ := sharedFiles(t, "")
+	directory := filepath.Dir(files.Pgpass)
+	leftover := filepath.Join(directory, ".pgpass.tmp-123")
+	unrelated := filepath.Join(directory, ".pgpass.bak")
+	for _, path := range []string{leftover, unrelated} {
+		require.NoError(t, os.WriteFile(path, []byte("127.0.0.1:15000:data:reader:secret\n"), 0o600))
+	}
+	_, err := files.Recover()
+	require.NoError(t, err)
+	assert.NoFileExists(t, leftover)
+	assert.FileExists(t, unrelated)
 }
 
 func TestUnterminatedSharedBlockIsLeftAlone(t *testing.T) {
