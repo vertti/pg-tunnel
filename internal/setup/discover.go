@@ -3,7 +3,6 @@ package setup
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -27,7 +26,7 @@ func account(ctx context.Context, cfg *aws.Config) (string, error) {
 	defer cancel()
 	result, err := sts.NewFromConfig(*cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
-		return "", fmt.Errorf("identify AWS account; check your AWS profile or renew your login: %w", err)
+		return "", awsdb.CallFailed("STS GetCallerIdentity", err, "", "Check your AWS profile or renew your login")
 	}
 	return aws.ToString(result.Account), nil
 }
@@ -40,7 +39,9 @@ func databases(ctx context.Context, cfg *aws.Config) ([]rdstypes.DBInstance, err
 	for pages.HasMorePages() {
 		page, err := pages.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("list RDS databases; check rds:DescribeDBInstances permission in %s: %w", cfg.Region, err)
+			return nil, awsdb.CallFailed("RDS DescribeDBInstances in "+cfg.Region, err,
+				"init needs it to list databases; without it, write the connection in pg-tunnel.json by hand using host, port and sslrootcert",
+				"Check the region and AWS profile")
 		}
 		for i := range page.DBInstances {
 			db := &page.DBInstances[i]
@@ -63,7 +64,7 @@ func onlineNodes(ctx context.Context, cfg *aws.Config) (map[string]bool, error) 
 	for pages.HasMorePages() {
 		page, err := pages.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("list online SSM nodes; check ssm:DescribeInstanceInformation permission: %w", err)
+			return nil, awsdb.CallFailed("SSM DescribeInstanceInformation", err, "", "")
 		}
 		for i := range page.InstanceInformationList {
 			result[aws.ToString(page.InstanceInformationList[i].InstanceId)] = true
@@ -86,7 +87,7 @@ func jumpHosts(ctx context.Context, cfg *aws.Config, vpc string) ([]ec2types.Ins
 	for pages.HasMorePages() {
 		page, pageErr := pages.NextPage(ctx)
 		if pageErr != nil {
-			return nil, fmt.Errorf("list jump hosts; check ec2:DescribeInstances permission: %w", pageErr)
+			return nil, awsdb.CallFailed("EC2 DescribeInstances", pageErr, "", "")
 		}
 		for _, reservation := range page.Reservations {
 			for i := range reservation.Instances {

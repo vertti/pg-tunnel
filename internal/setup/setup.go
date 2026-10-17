@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,7 +16,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 
-	"github.com/vertti/pg-tunnel/internal/awsdb"
 	"github.com/vertti/pg-tunnel/internal/libpq"
 	"github.com/vertti/pg-tunnel/internal/profile"
 	"github.com/vertti/pg-tunnel/internal/session"
@@ -40,7 +38,7 @@ type prompt struct {
 }
 
 // Run previews a profile, then verifies and saves it after explicit confirmation.
-// Input must honor cancellation; the CLI supplies a cancellable terminal reader.
+// Input must honor cancellation.
 func (w *Wizard) Run(ctx context.Context) error {
 	ui := prompt{input: bufio.NewScanner(w.Input), output: w.Output}
 	id, err := account(ctx, &w.Config)
@@ -67,12 +65,6 @@ func (w *Wizard) Run(ctx context.Context) error {
 	}
 	if p.LocalPort, err = freeLocalPort(ctx, w.Path); err != nil {
 		return err
-	}
-	if p.RootCert == "" {
-		logger := log.New(w.Output, "", 0)
-		if _, err = awsdb.RDSCA(ctx, w.Config.Region, func(message string) { logger.Print(message) }); err != nil {
-			return fmt.Errorf("prepare automatic RDS certificates: %w", err)
-		}
 	}
 	return w.save(ctx, &ui, &p)
 }
@@ -125,7 +117,7 @@ func chooseTarget(ctx context.Context, ui *prompt, cfg *aws.Config, db *rdstypes
 	hosts, err := jumpHosts(ctx, cfg, vpc)
 	if err != nil {
 		if ctx.Err() != nil {
-			return "", fmt.Errorf("discovery cancelled: %w", ctx.Err())
+			return "", errors.New("discovery canceled")
 		}
 		if printErr := ui.print("Jump-host discovery unavailable: %v\nEnter an SSM target manually to continue.\n", err); printErr != nil {
 			return "", printErr
@@ -145,7 +137,7 @@ func chooseTarget(ctx context.Context, ui *prompt, cfg *aws.Config, db *rdstypes
 		return "", err
 	}
 	if index == len(hosts) {
-		return ui.ask("SSM target ID", "")
+		return ui.ask("Jump host instance ID (i-...)", "")
 	}
 	return aws.ToString(hosts[index].InstanceId), nil
 }
@@ -164,11 +156,11 @@ func authenticationDetails(ui *prompt, p *profile.Profile, db *rdstypes.DBInstan
 		return nil
 	}
 	p.Auth = profile.AuthSecretsManager
-	var suggestion string
+	question, suggestion := "Secret name or ARN", ""
 	if db.MasterUserSecret != nil {
-		suggestion = aws.ToString(db.MasterUserSecret.SecretArn)
+		question, suggestion = question+" (suggested: the RDS master-user secret)", aws.ToString(db.MasterUserSecret.SecretArn)
 	}
-	p.SecretID, err = ui.ask("Secret name or ARN (RDS suggestion is the master-user secret)", suggestion)
+	p.SecretID, err = ui.ask(question, suggestion)
 	return err
 }
 
@@ -231,10 +223,10 @@ func (w *Wizard) save(ctx context.Context, ui *prompt, p *profile.Profile) error
 		return err
 	}
 	if !strings.EqualFold(answer, "yes") && !strings.EqualFold(answer, "y") {
-		return ui.print("Cancelled; no configuration written.\n")
+		return ui.print("Canceled; no configuration written.\n")
 	}
 	if err = ctx.Err(); err != nil {
-		return fmt.Errorf("setup cancelled before saving: %w", err)
+		return fmt.Errorf("init canceled before saving: %w", err)
 	}
 	if err := w.verify(ctx, ui, p); err != nil {
 		return err
@@ -266,7 +258,7 @@ func freeLocalPort(ctx context.Context, path string) (int, error) {
 		if used[port] {
 			continue
 		}
-		listener, listenErr := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		listener, listenErr := (&net.ListenConfig{}).Listen(ctx, "tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 		if listenErr == nil {
 			if err = listener.Close(); err != nil {
 				return 0, fmt.Errorf("release local port check: %w", err)
@@ -274,7 +266,7 @@ func freeLocalPort(ctx context.Context, path string) (int, error) {
 			return port, nil
 		}
 	}
-	return 0, fmt.Errorf("no free local port from %d to %d; free one or set local_port in %s", firstLocalPort, firstLocalPort+999, path)
+	return 0, fmt.Errorf("no free local port from %d to %d; stop other pg-tunnel sessions or programs using these ports, then rerun pg-tunnel init", firstLocalPort, firstLocalPort+999)
 }
 
 func selectedByDefault(path string) bool {
@@ -296,14 +288,14 @@ func (w *Wizard) verify(ctx context.Context, ui *prompt, p *profile.Profile) err
 		return fmt.Errorf("connection test failed; configuration was not saved: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("setup cancelled before saving: %w", err)
+		return fmt.Errorf("init canceled before saving: %w", err)
 	}
 	return ui.print("Connection test passed; temporary session cleaned up.\n")
 }
 
 func (p *prompt) print(format string, args ...any) error {
 	if _, err := fmt.Fprintf(p.output, format, args...); err != nil {
-		return fmt.Errorf("write setup prompt: %w", err)
+		return fmt.Errorf("write init prompt: %w", err)
 	}
 	return nil
 }
@@ -320,9 +312,9 @@ func (p *prompt) ask(label, fallback string) (string, error) {
 		}
 		if !p.input.Scan() {
 			if err := p.input.Err(); err != nil {
-				return "", fmt.Errorf("read setup answer: %w", err)
+				return "", fmt.Errorf("read init answer: %w", err)
 			}
-			return "", errors.New("setup input ended; no configuration written")
+			return "", errors.New("init input ended; no configuration written")
 		}
 		answer := strings.TrimSpace(p.input.Text())
 		if answer == "" {

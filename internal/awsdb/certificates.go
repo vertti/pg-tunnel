@@ -56,7 +56,7 @@ func cachedCA(ctx context.Context, client *http.Client, path, source string, rep
 	if err != nil {
 		if usable && ctx.Err() == nil {
 			if report != nil {
-				report(fmt.Sprintf("Warning: could not refresh the RDS CA bundle: %v; using the cached bundle. Server identity and certificate expiry are still verified.", err))
+				report(fmt.Sprintf("WARNING: Could not refresh the RDS CA bundle: %v; using the cached bundle. Server identity and certificate expiry are still verified.", err))
 			}
 			return path, nil
 		}

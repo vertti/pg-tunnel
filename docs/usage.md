@@ -91,8 +91,7 @@ The SSM host must reach the database and support
 
 | Operation | Permissions |
 | --- | --- |
-| Open and close tunnels | `ssm:StartSession`, `ssm:TerminateSession` |
-| Confirm an already-ended session after a termination error | `ssm:DescribeSessions` |
+| Open and close tunnels | `ssm:StartSession`, and `ssm:TerminateSession` or `ssm:DescribeSessions` |
 | Recover an interrupted tunnel | `ssm:ResumeSession` |
 | Find an RDS instance | `rds:DescribeDBInstances` |
 | Find an Aurora cluster | `rds:DescribeDBClusters` |
@@ -166,13 +165,7 @@ connection strings can override these settings; `DATABASE_URL` is not rewritten.
 Go pgx pools need the [connection hook](compatibility.md#go-pgx-pools).
 
 Launch a notebook server through `pg-tunnel run development -- uv run jupyter lab`,
-then connect from a notebook:
-
-```python
-import psycopg
-
-conn = psycopg.connect("")
-```
+then connect from a notebook with `psycopg.connect("")`.
 
 Notebooks in one Lab server share a tunnel. Each separately launched Lab server,
 such as one per worktree, gets its own tunnel and credentials. Restarting a
@@ -186,21 +179,23 @@ keep a tunnel open in a terminal:
 pg-tunnel connect development
 ```
 
-With a fixed `local_port`, which `init` sets, the session prints the address and
-a connection string:
+The session prints the address and a connection string. The fixed `local_port`
+that `init` sets keeps the port the same between sessions, so saved app settings
+keep working:
 
 ```text
-pg-tunnel: Apps such as Postico can connect to host 127.0.0.1, port 15000, database "data", user "reader", SSL required, password left empty (~/.pgpass holds the current one). Connection string:
+pg-tunnel: Postico, notebooks and scripts in any terminal can connect to host 127.0.0.1, port 15000, database "data", user "reader", SSL required, password left empty (~/.pgpass holds the current one). Connection string:
   postgresql://reader@127.0.0.1:15000/data?sslmode=require
 ```
 
 Leave the password empty: while the session runs, pg-tunnel keeps the current
 password or IAM token in a marked block at the top of `~/.pgpass` and removes it
-when the session ends. Your other lines stay unchanged. Use `127.0.0.1` rather
-than `localhost`, which clients may try over IPv6 first, where the tunnel does
-not listen. TLS encrypts these connections but cannot verify the database
-hostname; for full verification, paste the printed shell exports into another
-terminal instead. Ctrl-C closes `connect` and exits 0. GUI support depends on
+when the session ends. Your other lines stay unchanged. Use `127.0.0.1`, not
+`localhost`: `localhost` may resolve to IPv6, where the tunnel does not listen,
+so pg-tunnel stores the password only for `127.0.0.1`. TLS encrypts these connections but cannot verify the database
+hostname; for full verification, start the client with `run`. If another session
+holds the fixed port, `connect` uses a free port and prints it. Ctrl-C closes
+`connect` and exits 0. GUI support depends on
 the [client](compatibility.md).
 
 See [network recovery](recovery.md) and the [container recipe](containers.md)
@@ -231,3 +226,16 @@ pg-tunnel cleanup
 
 Secrets Manager passwords do not expire automatically, so clean up after an
 uncatchable termination. The client's own descendants may need separate termination.
+
+## Troubleshooting
+
+| Message contains | Fix |
+| --- | --- |
+| `AWS SSO login for profile … has expired` | Run the `aws sso login --profile …` command it prints. A running session picks up the new login on its next refresh. |
+| `… was denied: …` | Your AWS identity lacks the permission AWS names; see [AWS access](#aws-access). |
+| `… is not connected` or `online in SSM` | The jump host is not registered with SSM. Check it is running and listed by `aws ssm describe-instance-information`. |
+| `database rejected login` | For Secrets Manager, the secret's password does not match the database. Users with `rds_iam` must use IAM authentication; for IAM, check `rds-db:connect` and the `rds_iam` grant. |
+| `Credential refresh failed` | The current credential stays in use while pg-tunnel retries; fix the cause the message names. |
+
+After a secret rotation, new connections can fail for up to five minutes until
+pg-tunnel reads the new password; open connections are unaffected.

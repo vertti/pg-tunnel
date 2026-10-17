@@ -148,6 +148,18 @@ func load(path, name string) (Profile, error) {
 	return value, nil
 }
 
+// Names lists the connections in the configuration Load would read.
+func Names(path string) (file string, names []string, err error) {
+	if file, _, err = configPath(path); err != nil {
+		return "", nil, err
+	}
+	config, err := readConfig(file)
+	if err != nil {
+		return "", nil, err
+	}
+	return file, slices.Sorted(maps.Keys(config.Profiles)), nil
+}
+
 func available(profiles map[string]Profile) string {
 	if len(profiles) == 0 {
 		return "it has no connections yet; create one with pg-tunnel init"
@@ -225,11 +237,11 @@ func (p *Profile) validateOptions() error {
 	switch p.Auth {
 	case "", AuthIAM:
 		if p.SecretID != "" {
-			return errors.New("secret_id requires auth=secrets-manager; IAM is the default")
+			return errors.New(`secret_id requires "auth": "secrets-manager"; IAM is the default`)
 		}
 	case AuthSecretsManager:
 		if p.SecretID == "" {
-			return errors.New("auth=secrets-manager requires secret_id (secret name or full ARN)")
+			return errors.New(`"auth": "secrets-manager" requires secret_id (secret name or full ARN)`)
 		}
 	default:
 		return errors.New("auth must be iam or secrets-manager")

@@ -17,7 +17,7 @@ import (
 )
 
 func TestPgxPoolExampleWithPostgres(t *testing.T) {
-	target, port := startPostgres(t, requireInitdb(t))
+	target, port := startPostgres(t)
 	files := libpq.Files{Root: filepath.Join(t.TempDir(), "sessions")}
 	first, err := files.Prepare(target, port, session.Credential{Secret: postgresPassword})
 	require.NoError(t, err)

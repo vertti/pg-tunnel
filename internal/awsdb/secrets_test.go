@@ -31,15 +31,17 @@ func TestSecretsValidateWithoutLeakingValues(t *testing.T) {
 		{"missing password", `{"username":"reader"}`, "password"},
 		{"newline", `{"username":"reader","password":"private-marker\n"}`, "unsupported"},
 		{"wrong host", `{"username":"reader","password":"private-marker","host":"other.example"}`, "host"},
+		{"string port", `{"username":"reader","password":"test:password\\value","port":"5432"}`, ""},
 		{"wrong port", `{"username":"reader","password":"private-marker","port":5433}`, "port"},
 		{"wrong engine", `{"username":"reader","password":"private-marker","engine":"mysql"}`, "engine"},
 		{"invalid JSON", `{"password":"private-marker"`, "JSON"},
+		{"wrong string port", `{"username":"reader","password":"private-marker","port":"5433"}`, "port"},
 		{"invalid type", `{"username":"reader","password":"private-marker","port":"private-marker"}`, "JSON"},
 		{"null", `null`, "username"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			payload, err := json.Marshal(map[string]string{"SecretString": tc.value})
+			payload, err := json.Marshal(map[string]any{"SecretString": tc.value, "CreatedDate": 1792280000})
 			require.NoError(t, err)
 			auth := secretAuth(t, http.StatusOK, string(payload))
 			credential, err := auth.Credential(t.Context(), session.Target{Host: "db.example", Port: 5432, User: "reader"})
@@ -52,6 +54,7 @@ func TestSecretsValidateWithoutLeakingValues(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, `test:password\value`, credential.Secret)
 			assert.True(t, credential.ExpiresAt.IsZero())
+			assert.Equal(t, int64(1792280000), credential.CreatedAt.Unix())
 		})
 	}
 }
@@ -80,7 +83,7 @@ func TestSecretsErrorsDoNotExposeResponseBodies(t *testing.T) {
 		status              int
 	}{
 		{"binary", `{"SecretBinary":"cHJpdmF0ZS1tYXJrZXI="}`, "binary secrets", http.StatusOK},
-		{"denied", `{"__type":"AccessDeniedException","Message":"private-marker"}`, "AccessDeniedException", http.StatusBadRequest},
+		{"denied", `{"__type":"AccessDeniedException","Message":"Access to KMS is not allowed"}`, `Secrets Manager GetSecretValue for "chosen-secret" in  was denied: Access to KMS is not allowed. The AWS role needs`, http.StatusBadRequest},
 		{"malformed response", `{"SecretString":{"password":"private-marker"}}`, "request failed", http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

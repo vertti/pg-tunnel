@@ -15,6 +15,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds"
+	"github.com/aws/aws-sdk-go-v2/credentials/ssocreds"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -25,7 +27,6 @@ import (
 	"github.com/vertti/pg-tunnel/internal/process"
 	"github.com/vertti/pg-tunnel/internal/profile"
 	"github.com/vertti/pg-tunnel/internal/session"
-	"github.com/vertti/pg-tunnel/internal/setup"
 )
 
 func runSession(ctx context.Context, mode string, args []string, stdout, stderr io.Writer) error {
@@ -39,13 +40,13 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 	if help, err := parseFlags(flags, args, stdout); help || err != nil {
 		return err
 	}
-	name, command, err := sessionArguments(mode, flags.Args())
+	name, command, err := sessionArguments(mode, path, flags.Args())
 	if err != nil {
 		return err
 	}
 	if len(command) > 0 {
 		if _, err = exec.LookPath(command[0]); err != nil {
-			return fmt.Errorf("find command before connecting: %w", err)
+			return fmt.Errorf("cannot run %q: %w; install it or give its full path", command[0], errors.Unwrap(err))
 		}
 	}
 	p, err := profile.Load(path, name)
@@ -56,13 +57,15 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 		return checkConnection(ctx, &p, stderr)
 	}
 	report := reporter(stderr)
-	return execute(ctx, &p, sessionCommand(command, stdout, report), report)
+	return execute(ctx, &p, sessionCommand(command, report), report, mode == "connect")
 }
+
+var errNoAWSCredentials = errors.New("no AWS credentials found")
 
 var verifyOnly session.Command = func(ctx context.Context, _ []string) error { return ctx.Err() }
 
 func checkConnection(ctx context.Context, p *profile.Profile, output io.Writer) error {
-	if err := execute(ctx, p, verifyOnly, reporter(output)); err != nil {
+	if err := execute(ctx, p, verifyOnly, reporter(output), false); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(output, "Connection check passed; local tunnel and temporary credentials cleaned up."); err != nil {
@@ -76,7 +79,10 @@ func reporter(output io.Writer) func(string) {
 	return func(message string) { logger.Print(message) }
 }
 
-const setupTimeout = 30 * time.Second
+var setupTimeout = 30 * time.Second
+
+// configureRunner lets scenario tests replace the SSM transport and shorten polling.
+var configureRunner = func(*session.Runner) {}
 
 var sessionSyntax = map[string]string{
 	"run":     "run [--config PATH] CONNECTION -- COMMAND [ARGS...]",
@@ -94,9 +100,9 @@ func configFlag(flags *flag.FlagSet, path *string, usage string) {
 	})
 }
 
-func sessionArguments(mode string, args []string) (name string, command []string, err error) {
+func sessionArguments(mode, path string, args []string) (name string, command []string, err error) {
 	if len(args) == 0 {
-		return "", nil, usageError(mode, "%s needs a CONNECTION name: pg-tunnel %s", mode, sessionSyntax[mode])
+		return "", nil, missingConnection(mode, path)
 	}
 	name, rest := args[0], args[1:]
 	if len(rest) > 0 && strings.HasPrefix(rest[0], "-") && rest[0] != "--" {
@@ -120,13 +126,27 @@ func sessionArguments(mode string, args []string) (name string, command []string
 	return name, rest[1:], nil
 }
 
-func execute(ctx context.Context, p *profile.Profile, command session.Command, report func(string)) error {
+func missingConnection(mode, path string) error {
+	file, names, err := profile.Names(path)
+	switch {
+	case err != nil:
+		return usageErr(fmt.Sprintf("%s needs a CONNECTION, but %v", mode, err))
+	case len(names) == 0:
+		return usageErr(fmt.Sprintf("%s needs a CONNECTION, but %s has none yet; create one with pg-tunnel init", mode, file))
+	}
+	return usageErr(fmt.Sprintf("%s needs a CONNECTION; available: %s", mode, strings.Join(names, ", ")))
+}
+
+func execute(ctx context.Context, p *profile.Profile, command session.Command, report func(string), shareAnyPort bool) error {
 	if p.Environment == profile.EnvironmentProduction {
 		report("WARNING: PRODUCTION connection. Database changes affect the production environment.")
 	}
 	setupCtx, cancel := context.WithTimeout(ctx, setupTimeout)
 	defer cancel()
 	cfg, err := awsConfig(setupCtx, p)
+	if errors.Is(err, errNoAWSCredentials) {
+		return fmt.Errorf("%w; rerun with AWS_PROFILE=<profile>, or set aws_profile for this connection", err)
+	}
 	if err != nil {
 		return err
 	}
@@ -136,32 +156,31 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	}
 	jump, err := awsdb.JumpHost(setupCtx, ec2.NewFromConfig(cfg), p)
 	if err != nil {
-		return fmt.Errorf("discover jump host: %w", err)
+		return fmt.Errorf("discover jump host in %s: %w", cfg.Region, err)
 	}
 	files, err := sessionFiles()
 	if err != nil {
 		return err
 	}
-	files.LocalPort, files.Report = p.LocalPort, report
+	files.LocalPort, files.AnyPort, files.Report = p.LocalPort, shareAnyPort, report
 	authentication, err := databaseAuth(p, &cfg, report)
 	if err != nil {
 		return err
 	}
-	target, err := (&awsdb.Resolver{API: rds.NewFromConfig(cfg), Profile: p}).Resolve(setupCtx)
+	target, err := (&awsdb.Resolver{API: rds.NewFromConfig(cfg), Profile: p, Region: cfg.Region}).Resolve(setupCtx)
 	if err != nil {
 		return fmt.Errorf("discover database: %w", err)
 	}
+	ssmClient := ssm.NewFromConfig(cfg)
 	runner := session.Runner{
 		Target:    target,
-		Transport: &awsdb.SSM{API: ssm.NewFromConfig(cfg), Region: cfg.Region, Profile: p.AWSProfile, Target: jump, LocalPort: p.LocalPort, Report: report},
+		Transport: &awsdb.SSM{API: ssmClient, Region: cfg.Region, Profile: p.AWSProfile, Target: jump, LocalPort: p.LocalPort, Report: report, Endpoint: aws.ToString(ssmClient.Options().BaseEndpoint)},
 		Auth:      authentication,
 		Clients:   files, Verify: libpq.Verify, Env: os.Environ(), Report: report,
 		Command: command,
 	}
-	if err = runner.Run(ctx); err != nil {
-		return fmt.Errorf("database session: %w", err)
-	}
-	return nil
+	configureRunner(&runner)
+	return runner.Run(ctx) //nolint:wrapcheck // Session errors name the step that failed.
 }
 
 func prepareRootCert(ctx context.Context, p *profile.Profile, region string, report func(string)) error {
@@ -178,23 +197,14 @@ func prepareRootCert(ctx context.Context, p *profile.Profile, region string, rep
 	return nil
 }
 
-// sessionCommand runs command, or for connect prints shell exports of the client
-// settings to stdout and waits; stopping connect with a signal is a normal exit.
-func sessionCommand(command []string, stdout io.Writer, report func(string)) session.Command {
+// sessionCommand runs command, or for connect waits; stopping connect with a
+// signal is a normal exit.
+func sessionCommand(command []string, report func(string)) session.Command {
 	return func(ctx context.Context, env []string) error {
 		if len(command) > 0 {
 			return process.Run(ctx, command, env)
 		}
-		report("Keep this window open; Ctrl-C closes the tunnel. For psql or scripts in another terminal with full TLS verification, paste these exports there:")
-		for _, entry := range env {
-			name, value, _ := strings.Cut(entry, "=")
-			if !strings.HasPrefix(name, "PG") {
-				continue
-			}
-			if _, err := fmt.Fprintf(stdout, "export %s=%s\n", name, setup.ShellQuote(value)); err != nil {
-				return fmt.Errorf("write client settings: %w", err)
-			}
-		}
+		report("Keep this window open; Ctrl-C closes the tunnel.")
 		<-ctx.Done()
 		return nil
 	}
@@ -220,19 +230,39 @@ func awsConfig(ctx context.Context, p *profile.Profile) (aws.Config, error) {
 	}
 	// Discovery errors would otherwise blame IAM permissions for a missing login.
 	if _, err = cfg.Credentials.Retrieve(ctx); err != nil {
-		loginErr := fmt.Errorf("no usable AWS credentials; %s: %w", loginHint(&cfg), err)
-		return cfg, loginErr
+		err = credentialsError(&cfg, err)
+		return cfg, err
 	}
 	return cfg, nil
 }
 
-func loginHint(cfg *aws.Config) string {
+func sharedConfig(cfg *aws.Config) config.SharedConfig {
+	var shared config.SharedConfig
 	for _, source := range cfg.ConfigSources {
-		if shared, ok := source.(config.SharedConfig); ok && (shared.SSOSessionName != "" || shared.SSOStartURL != "") {
-			return "AWS profile " + shared.Profile + " uses IAM Identity Center; log in with aws sso login --profile " + shared.Profile
+		if value, ok := source.(config.SharedConfig); ok {
+			shared = value
 		}
 	}
-	return "make AWS credentials available the way the AWS CLI finds them (environment, a named profile, or aws-vault) and select a profile with AWS_PROFILE or the connection's aws_profile if needed"
+	return shared
+}
+
+func usesSSO(shared *config.SharedConfig) bool {
+	return shared.SSOSessionName != "" || shared.SSOStartURL != ""
+}
+
+func credentialsError(cfg *aws.Config, err error) error {
+	shared := sharedConfig(cfg)
+	if usesSSO(&shared) {
+		return fmt.Errorf("no usable AWS credentials; AWS profile %s uses AWS SSO; log in with aws sso login --profile %s: %w", shared.Profile, shared.Profile, err)
+	}
+	// The SDK falls back to the EC2 instance role only when nothing else configures credentials.
+	if aws.IsCredentialsProvider(cfg.Credentials, &ec2rolecreds.Provider{}) {
+		if shared.Profile != "" && shared.Profile != "default" {
+			return fmt.Errorf("AWS profile %s has no credentials (aws configure list --profile %s)", shared.Profile, shared.Profile)
+		}
+		return errNoAWSCredentials
+	}
+	return fmt.Errorf("no usable AWS credentials; make AWS credentials available the way the AWS CLI finds them (environment, a named profile, or aws-vault): %w", err)
 }
 
 func environmentExpiry() (time.Time, error) {
@@ -290,11 +320,34 @@ func cleanup(output io.Writer) error {
 
 func databaseAuth(p *profile.Profile, cfg *aws.Config, report func(string)) (session.Auth, error) {
 	if p.Auth == profile.AuthSecretsManager {
-		return awsdb.Secrets{API: secretsmanager.NewFromConfig(*cfg), ID: p.SecretID}, nil
+		return loginCheckedAuth{Auth: awsdb.Secrets{API: secretsmanager.NewFromConfig(*cfg), ID: p.SecretID, Region: cfg.Region}, cfg: cfg}, nil
 	}
 	expiry, err := environmentExpiry()
 	if err != nil {
 		return nil, err
 	}
-	return &awsdb.IAM{Provider: cfg.Credentials, Region: cfg.Region, EnvironmentExpiry: expiry, Report: report}, nil
+	return loginCheckedAuth{Auth: &awsdb.IAM{Provider: cfg.Credentials, Region: cfg.Region, EnvironmentExpiry: expiry, Report: report}, cfg: cfg}, nil
+}
+
+// loginCheckedAuth reports an expired AWS login as such, not as a failure of the AWS call it breaks.
+type loginCheckedAuth struct {
+	session.Auth
+	cfg *aws.Config
+}
+
+// Credential checks the AWS login before asking the wrapped Auth for a credential.
+func (a loginCheckedAuth) Credential(ctx context.Context, target session.Target) (session.Credential, error) {
+	if _, err := a.cfg.Credentials.Retrieve(ctx); err != nil {
+		shared := sharedConfig(a.cfg)
+		var expired *ssocreds.InvalidTokenError
+		switch {
+		case usesSSO(&shared) && errors.As(err, &expired):
+			return session.Credential{}, fmt.Errorf("AWS SSO login for profile %s has expired; run aws sso login --profile %s", shared.Profile, shared.Profile)
+		case usesSSO(&shared):
+			return session.Credential{}, fmt.Errorf("AWS SSO credentials for profile %s are unavailable; if aws sso login --profile %s does not help: %w", shared.Profile, shared.Profile, err)
+		default:
+			return session.Credential{}, fmt.Errorf("AWS credentials are unavailable: %w", err)
+		}
+	}
+	return a.Auth.Credential(ctx, target) //nolint:wrapcheck // The wrapped Auth names its own AWS call.
 }

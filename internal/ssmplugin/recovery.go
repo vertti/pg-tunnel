@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -36,8 +37,8 @@ func resumeSession(s *session.Session, logger log.T) error {
 
 // RecoveryStarted and RecoveryResumed are the only child progress messages forwarded live.
 const (
-	RecoveryStarted = "SSM connection interrupted; resuming the existing session for up to 1m. Client remains running; database operations may fail."
-	RecoveryResumed = "SSM data channel resumed; client and local port retained. Retry failed database operations only when safe; SQL is not replayed."
+	RecoveryStarted = "SSM connection interrupted; resuming the session for up to 1 minute. Your client keeps running, but queries may fail meanwhile."
+	RecoveryResumed = "SSM connection restored on the same local port. Failed queries were not replayed; retry them if safe."
 )
 
 type recoveryChannel struct {
@@ -74,7 +75,15 @@ type recoverySocket struct {
 // SetOnError keeps the preinstalled callback when AWS installs its finite retry loop.
 func (*recoverySocket) SetOnError(func(error)) {}
 
-const recoveryExpired = "SSM recovery exceeded 1m; stopping the tunnel and child command. Check network access and AWS login before restarting"
+const (
+	recoveryExpired = "SSM recovery exceeded 1 minute. Check network access and AWS login, then rerun your pg-tunnel command"
+	resumeRejected  = "SSM resume rejected"
+)
+
+// StopReason reports whether a child output line explains why the tunnel stopped.
+func StopReason(line string) bool {
+	return strings.HasPrefix(line, recoveryExpired) || strings.HasPrefix(line, resumeRejected)
+}
 
 func resumeWithin(ctx context.Context, resume func() error) error {
 	delay := time.Second
@@ -92,7 +101,7 @@ func resumeWithin(ctx context.Context, resume func() error) error {
 				return nil
 			}
 			if reason := terminalResumeError(err); reason != "" {
-				return fmt.Errorf("SSM resume rejected: %s; stopping the tunnel and child command. Check AWS login and session access before restarting", reason)
+				return fmt.Errorf(resumeRejected+": %s. Check AWS login and session access, then rerun your pg-tunnel command", reason)
 			}
 		}
 		timer := time.NewTimer(delay)

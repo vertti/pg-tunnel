@@ -175,15 +175,51 @@ func TestRefreshRetriesAndJoinsBeforeCleanup(t *testing.T) {
 		mu.Lock()
 		assert.Equal(t, 2, calls)
 		assert.Empty(t, published)
-		assert.Contains(t, strings.Join(messages, "\n"), "Retry in 5s")
+		assert.Contains(t, strings.Join(messages, "\n"), "pg-tunnel keeps retrying")
 		mu.Unlock()
 		time.Sleep(5 * time.Second)
 		synctest.Wait()
 		mu.Lock()
 		assert.Equal(t, []string{"fresh"}, published)
+		assert.Contains(t, messages, "Credential refresh recovered.")
 		mu.Unlock()
 		require.NoError(t, stop())
 		assert.Equal(t, []string{"client closed", "tunnel closed"}, *events)
+	})
+}
+
+func TestRefreshReportsOnlyChangedFailuresAndRecovery(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		runner, _, _, _ := fixture()
+		var mu sync.Mutex
+		calls := 0
+		var messages []string
+		runner.Report = func(message string) { mu.Lock(); defer mu.Unlock(); messages = append(messages, message) }
+		runner.Auth = authFunc(func(context.Context, session.Target) (session.Credential, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			calls++
+			switch {
+			case calls == 1 || calls > 5:
+				return session.Credential{Secret: "password"}, nil
+			case calls < 5:
+				return session.Credential{}, errors.New("login expired")
+			default:
+				return session.Credential{}, errors.New("access denied")
+			}
+		})
+		stop := runUntilStopped(t, &runner)
+		time.Sleep(10 * time.Minute)
+		synctest.Wait()
+		require.NoError(t, stop())
+		var refresh []string
+		for _, message := range messages {
+			if strings.HasPrefix(message, "Credential refresh") {
+				refresh = append(refresh, strings.SplitN(message, ".", 2)[0])
+			}
+		}
+		assert.Equal(t, []string{"Credential refresh failed: login expired", "Credential refresh failed: access denied", "Credential refresh recovered"}, refresh)
 	})
 }
 
@@ -287,11 +323,10 @@ func TestPasswordRotationVerifiesBeforePublishingAndRetainsPreviousOnFailure(t *
 			mu.Lock()
 			defer mu.Unlock()
 			calls++
-			value := "original"
 			if calls >= 3 {
-				value = "rotated"
+				return session.Credential{Secret: "rotated", CreatedAt: time.Date(2026, 10, 17, 23, 30, 0, 0, time.UTC)}, nil
 			}
-			return session.Credential{Secret: value}, nil
+			return session.Credential{Secret: "original"}, nil
 		})
 		runner.Verify = func(_ context.Context, _ session.Target, _ int, _ session.Credential, report func(string)) error {
 			mu.Lock()
@@ -320,13 +355,23 @@ func TestPasswordRotationVerifiesBeforePublishingAndRetainsPreviousOnFailure(t *
 		synctest.Wait()
 		mu.Lock()
 		assert.Empty(t, published, "a rejected replacement must never reach the password file")
-		assert.Contains(t, strings.Join(messages, "\n"), "previous password is still published")
+		assert.Contains(t, strings.Join(messages, "\n"), "New connections keep using the current password")
 		assert.NotContains(t, strings.Join(messages, "\n"), "0001-")
 		mu.Unlock()
 		time.Sleep(5 * time.Second)
 		synctest.Wait()
 		mu.Lock()
 		assert.Equal(t, []string{"rotated"}, published)
+		passwordMessages := []string{}
+		for _, message := range messages {
+			if strings.HasPrefix(message, "Secrets Manager password") {
+				passwordMessages = append(passwordMessages, message)
+			}
+		}
+		assert.Equal(t, []string{
+			"Secrets Manager password loaded; checking for rotation every 5 minutes. New connections may fail between rotation and refresh.",
+			"Secrets Manager password rotated (created 2026-10-17T23:30:00Z); new connections use it.",
+		}, passwordMessages, "unchanged passwords are not re-reported")
 		mu.Unlock()
 		require.NoError(t, stop())
 		assert.Equal(t, []string{"client closed", "tunnel closed"}, *events)

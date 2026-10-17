@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -36,6 +37,7 @@ type EC2API interface {
 type Resolver struct {
 	API     RDSAPI
 	Profile *profile.Profile
+	Region  string
 }
 
 // Resolve returns the real endpoint used for IAM signing and TLS verification.
@@ -53,7 +55,9 @@ func (r *Resolver) Resolve(ctx context.Context) (session.Target, error) {
 func (r *Resolver) resolveInstance(ctx context.Context, target session.Target) (session.Target, error) {
 	output, err := r.API.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{DBInstanceIdentifier: aws.String(r.Profile.DBInstance)})
 	if err != nil {
-		return target, fmt.Errorf("RDS DescribeDBInstances for %q (check region, AWS profile, and rds:DescribeDBInstances permission): %w", r.Profile.DBInstance, err)
+		return target, CallFailed(fmt.Sprintf("RDS DescribeDBInstances for %q in %s", r.Profile.DBInstance, r.Region), err,
+			"To skip discovery, use host, port and sslrootcert instead of db_instance",
+			"Check the instance name, region and AWS profile")
 	}
 	if len(output.DBInstances) != 1 {
 		return target, fmt.Errorf("expected one RDS instance, found %d", len(output.DBInstances))
@@ -63,7 +67,7 @@ func (r *Resolver) resolveInstance(ctx context.Context, target session.Target) (
 		return target, errors.New("only RDS and Aurora PostgreSQL instances are supported; use an explicit host for other PostgreSQL endpoints")
 	}
 	if r.Profile.Auth != profile.AuthSecretsManager && !aws.ToBool(db.IAMDatabaseAuthenticationEnabled) {
-		return target, errors.New("IAM database authentication is disabled on this RDS instance")
+		return target, errors.New("IAM database authentication is disabled on this RDS instance; enable it on the instance, or use \"auth\": \"secrets-manager\" with secret_id")
 	}
 	if db.Endpoint == nil || aws.ToString(db.Endpoint.Address) == "" || aws.ToInt32(db.Endpoint.Port) <= 0 {
 		return target, errors.New("RDS did not return a usable database endpoint")
@@ -75,7 +79,9 @@ func (r *Resolver) resolveInstance(ctx context.Context, target session.Target) (
 func (r *Resolver) resolveCluster(ctx context.Context, target session.Target) (session.Target, error) {
 	output, err := r.API.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(r.Profile.DBCluster)})
 	if err != nil {
-		return target, fmt.Errorf("RDS DescribeDBClusters for %q (check region, AWS profile, and rds:DescribeDBClusters permission): %w", r.Profile.DBCluster, err)
+		return target, CallFailed(fmt.Sprintf("RDS DescribeDBClusters for %q in %s", r.Profile.DBCluster, r.Region), err,
+			"To skip discovery, use host, port and sslrootcert instead of db_cluster",
+			"Check the cluster name, region and AWS profile")
 	}
 	if len(output.DBClusters) != 1 {
 		return target, fmt.Errorf("expected one Aurora cluster, found %d", len(output.DBClusters))
@@ -85,7 +91,7 @@ func (r *Resolver) resolveCluster(ctx context.Context, target session.Target) (s
 		return target, errors.New("db_cluster supports only Aurora PostgreSQL; use db_instance or an explicit host for other PostgreSQL endpoints")
 	}
 	if r.Profile.Auth != profile.AuthSecretsManager && !aws.ToBool(db.IAMDatabaseAuthenticationEnabled) {
-		return target, errors.New("IAM database authentication is disabled on this Aurora cluster")
+		return target, errors.New("IAM database authentication is disabled on this Aurora cluster; enable it on the cluster, or use \"auth\": \"secrets-manager\" with secret_id")
 	}
 	endpoint, kind := aws.ToString(db.Endpoint), profile.ClusterWriter
 	if r.Profile.ClusterEndpoint == profile.ClusterReader {
@@ -118,7 +124,9 @@ func JumpHost(ctx context.Context, api EC2API, p *profile.Profile) (string, erro
 	for pages.HasMorePages() {
 		output, err := pages.NextPage(ctx)
 		if err != nil {
-			return "", fmt.Errorf("EC2 DescribeInstances for Name=%q (check ec2:DescribeInstances permission): %w", p.JumpTag, err)
+			return "", CallFailed(fmt.Sprintf("EC2 DescribeInstances for Name=%q", p.JumpTag), err,
+				"To skip this lookup, set target to the jump host's instance ID",
+				"Check the region and AWS profile")
 		}
 		for _, reservation := range output.Reservations {
 			for index := range reservation.Instances {
@@ -126,8 +134,13 @@ func JumpHost(ctx context.Context, api EC2API, p *profile.Profile) (string, erro
 			}
 		}
 	}
-	if len(ids) != 1 || ids[0] == "" {
-		return "", fmt.Errorf("expected one running jump host with Name=%q, found %d; configure an explicit target if ambiguous", p.JumpTag, len(ids))
+	switch {
+	case len(ids) == 0:
+		return "", fmt.Errorf("no running instance has Name=%q; check jump_tag and the region, or set target to the jump host's instance ID", p.JumpTag)
+	case len(ids) > 1:
+		return "", fmt.Errorf("%d running instances have Name=%q (%s); set target to one of them", len(ids), p.JumpTag, strings.Join(ids, ", "))
+	case ids[0] == "":
+		return "", errors.New("EC2 returned a jump host without an instance ID; set target to the jump host's instance ID")
 	}
 	return ids[0], nil
 }
@@ -180,5 +193,5 @@ func credentialStatus(value *aws.Credentials, expiry time.Time) string {
 	if value.SessionToken != "" {
 		return "AWS temporary credential expiry is unknown; static environment credentials cannot be renewed. Use a refreshable AWS profile or aws-vault exec --server."
 	}
-	return "AWS credential expiry is not reported by the provider."
+	return ""
 }

@@ -40,7 +40,7 @@ func Save(path, name string, p *Profile) error {
 	}
 	defer lock.Close() //nolint:errcheck // Closing the read-only directory releases the advisory lock.
 	if err = unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		return fmt.Errorf("lock configuration directory; retry after the other setup finishes: %w", err)
+		return fmt.Errorf("lock configuration directory; retry after the other pg-tunnel init finishes: %w", err)
 	}
 	profiles, err := profilesToSave(path)
 	if err != nil {

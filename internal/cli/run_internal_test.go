@@ -20,22 +20,19 @@ import (
 	"github.com/vertti/pg-tunnel/internal/testutil"
 )
 
-func TestConnectReportsOnlyClientSettingsUntilStopped(t *testing.T) {
+func TestConnectWaitsWithoutPrintingClientSettings(t *testing.T) {
 	t.Parallel()
 	var reported []string
-	var stdout bytes.Buffer
-	command := sessionCommand(nil, &stdout, func(message string) { reported = append(reported, message) })
+	command := sessionCommand(nil, func(message string) { reported = append(reported, message) })
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	require.NoError(t, command(ctx, []string{"PGSERVICE=pg-tunnel", "AWS_SECRET_ACCESS_KEY=private-marker", "PGPASSFILE=/private/it's here/pgpass"}), "Ctrl-C is the normal way to stop connect")
-	assert.Equal(t, "export PGSERVICE='pg-tunnel'\nexport PGPASSFILE='/private/it'\"'\"'s here/pgpass'\n", stdout.String())
-	require.Len(t, reported, 1)
-	assert.NotContains(t, reported[0], "private-marker")
+	require.NoError(t, command(ctx, []string{"PGSERVICE=pg-tunnel", "PGPASSFILE=/private/pgpass"}), "Ctrl-C is the normal way to stop connect")
+	assert.Equal(t, []string{"Keep this window open; Ctrl-C closes the tunnel."}, reported)
 }
 
 func TestRunPassesSessionEnvironmentToCommand(t *testing.T) {
 	t.Parallel()
-	command := sessionCommand([]string{"sh", "-c", `test "$PGSERVICE" = pg-tunnel`}, io.Discard, func(string) {})
+	command := sessionCommand([]string{"sh", "-c", `test "$PGSERVICE" = pg-tunnel`}, func(string) {})
 	require.NoError(t, command(t.Context(), []string{"PGSERVICE=pg-tunnel"}))
 }
 
@@ -70,13 +67,17 @@ func TestDatabaseAuthSelectsConfiguredMode(t *testing.T) {
 
 	auth, err := databaseAuth(&profile.Profile{Auth: profile.AuthSecretsManager, SecretID: "chosen"}, &cfg, nil)
 	require.NoError(t, err)
-	secrets, ok := auth.(awsdb.Secrets)
+	checked, ok := auth.(loginCheckedAuth)
+	require.True(t, ok)
+	secrets, ok := checked.Auth.(awsdb.Secrets)
 	require.True(t, ok)
 	assert.Equal(t, "chosen", secrets.ID)
 
 	auth, err = databaseAuth(&profile.Profile{}, &cfg, nil)
 	require.NoError(t, err)
-	iam, ok := auth.(*awsdb.IAM)
+	checked, ok = auth.(loginCheckedAuth)
+	require.True(t, ok)
+	iam, ok := checked.Auth.(*awsdb.IAM)
 	require.True(t, ok)
 	assert.Equal(t, "eu-central-1", iam.Region)
 
@@ -99,16 +100,17 @@ func TestAWSConfigRequiresRegion(t *testing.T) {
 
 func TestMissingAWSLoginNamesTheFix(t *testing.T) {
 	isolateAWS(t)
-	ssoProfile := "[profile dev]\nsso_start_url = https://example.awsapps.com/start\nsso_region = eu-west-1\nsso_account_id = 123456789012\nsso_role_name = Reader\nregion = eu-west-1\n[profile keys]\nregion = eu-west-1\n"
+	ssoProfile := "[profile dev]\nsso_start_url = https://example.awsapps.com/start\nsso_region = eu-west-1\nsso_account_id = 123456789012\nsso_role_name = Reader\nregion = eu-west-1\n[profile keys]\nregion = eu-west-1\n[profile broken]\ncredential_process = false\nregion = eu-west-1\n"
 	require.NoError(t, os.WriteFile(os.Getenv("AWS_CONFIG_FILE"), []byte(ssoProfile), 0o600))
 	_, err := awsConfig(t.Context(), &profile.Profile{AWSProfile: "dev"})
 	require.ErrorContains(t, err, "aws sso login --profile dev")
-	for _, p := range []profile.Profile{{Region: "eu-west-1"}, {AWSProfile: "keys"}} {
-		_, err = awsConfig(t.Context(), &p)
-		require.ErrorContains(t, err, "no usable AWS credentials; make AWS credentials available")
-		require.ErrorContains(t, err, "AWS_PROFILE or the connection's aws_profile")
-		require.NotContains(t, err.Error(), "aws sso login", "only SSO profiles are told to use aws sso login")
-	}
+	_, err = awsConfig(t.Context(), &profile.Profile{Region: "eu-west-1"})
+	require.ErrorIs(t, err, errNoAWSCredentials)
+	_, err = awsConfig(t.Context(), &profile.Profile{AWSProfile: "keys"})
+	require.EqualError(t, err, "AWS profile keys has no credentials (aws configure list --profile keys)")
+	_, err = awsConfig(t.Context(), &profile.Profile{AWSProfile: "broken"})
+	require.ErrorContains(t, err, "no usable AWS credentials; make AWS credentials available")
+	require.NotContains(t, err.Error(), "aws sso login", "only SSO profiles are told to use aws sso login")
 }
 
 func TestSessionStopsAtFirstFailedStage(t *testing.T) {
@@ -161,6 +163,15 @@ func TestProductionWarningBeforeConnection(t *testing.T) {
 		require.ErrorContains(t, err, `load AWS profile "missing-test-profile"; check it exists (aws configure list-profiles)`)
 		assert.Equal(t, environment == "production", strings.Contains(output.String(), "WARNING: PRODUCTION"))
 	}
+}
+
+func TestConnectWithoutCredentialsNamesTheFix(t *testing.T) {
+	isolateAWS(t)
+	path := filepath.Join(t.TempDir(), "config.json")
+	p := profile.Profile{DBInstance: "example", Database: "data", User: "reader", Target: "i-example", Port: 5432, Region: "eu-west-1"}
+	require.NoError(t, profile.Save(path, "test", &p))
+	err := RunContext(t.Context(), []string{"connect", "--config", path, "test"}, io.Discard, io.Discard)
+	require.EqualError(t, err, "no AWS credentials found; rerun with AWS_PROFILE=<profile>, or set aws_profile for this connection")
 }
 
 func TestCleanupRemovesAbandonedSessions(t *testing.T) {

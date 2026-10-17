@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/aws/smithy-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -133,7 +134,7 @@ func TestClusterRejectsUnusableDiscovery(t *testing.T) {
 	}{
 		{name: "missing", count: 0, want: "found 0"},
 		{name: "ambiguous", count: 2, want: "found 2"},
-		{name: "denied", failure: errors.New("denied"), want: "rds:DescribeDBClusters permission"},
+		{name: "denied", failure: &smithy.GenericAPIError{Code: "AccessDenied", Message: "not authorized"}, want: "was denied: not authorized. To skip discovery, use host, port and sslrootcert instead of db_cluster"},
 		{name: "wrong engine", count: 1, edit: func(c *rdstypes.DBCluster) { c.Engine = aws.String("aurora-mysql") }, want: "only Aurora PostgreSQL"},
 		{name: "IAM disabled", count: 1, edit: func(c *rdstypes.DBCluster) { c.IAMDatabaseAuthenticationEnabled = nil }, want: "IAM database authentication is disabled"},
 		{name: "password does not require IAM", count: 1, auth: profile.AuthSecretsManager, edit: func(c *rdstypes.DBCluster) { c.IAMDatabaseAuthenticationEnabled = nil }},
@@ -177,6 +178,6 @@ func TestBusyLocalPortFallsBackToAnAvailablePort(t *testing.T) {
 	used := api.input.Parameters["localPortNumber"][0]
 	assert.NotEqual(t, strconv.Itoa(port), used)
 	require.Len(t, reports, 1)
-	assert.Contains(t, reports[0], fmt.Sprintf("localhost:%d is already in use", port))
-	assert.Contains(t, reports[0], "this session uses localhost:"+used)
+	assert.Contains(t, reports[0], fmt.Sprintf("127.0.0.1:%d is already in use", port))
+	assert.Contains(t, reports[0], "this session uses 127.0.0.1:"+used)
 }

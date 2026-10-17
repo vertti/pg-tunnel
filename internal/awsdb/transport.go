@@ -36,6 +36,7 @@ type SSM struct {
 	Region     string
 	Profile    string
 	Executable string // Overrides os.Executable for process test harnesses.
+	Endpoint   string // Overrides the default SSM endpoint for session recovery.
 	LocalPort  int
 }
 
@@ -72,7 +73,9 @@ func (s *SSM) Open(ctx context.Context, target session.Target) (_ session.Tunnel
 	defer cancel()
 	output, err := s.API.StartSession(startupCtx, input)
 	if err != nil {
-		return nil, fmt.Errorf("SSM StartSession for %s; check ssm:StartSession permission and the target's SSM connectivity: %w", s.Target, err)
+		return nil, CallFailed("SSM StartSession for "+s.Target, err,
+			"The AWS role needs ssm:StartSession on the jump host and on the AWS-StartPortForwardingSessionToRemoteHost document",
+			"Check that the jump host is online in SSM (aws ssm describe-instance-information)")
 	}
 	handle := &tunnel{api: s.API, sessionID: aws.ToString(output.SessionId), token: aws.ToString(output.TokenValue), port: port}
 	handle.logs = &logTail{report: s.Report, token: handle.token}
@@ -138,7 +141,11 @@ func startChild(ctx context.Context, args []string, response []byte, handle *tun
 }
 
 func (s *SSM) pluginArgs(ctx context.Context, path string) ([]string, error) {
-	endpoint, err := ssm.NewDefaultEndpointResolverV2().ResolveEndpoint(ctx, ssm.EndpointParameters{Region: aws.String(s.Region)})
+	parameters := ssm.EndpointParameters{Region: aws.String(s.Region)}
+	if s.Endpoint != "" {
+		parameters.Endpoint = aws.String(s.Endpoint)
+	}
+	endpoint, err := ssm.NewDefaultEndpointResolverV2().ResolveEndpoint(ctx, parameters)
 	if err != nil {
 		return nil, fmt.Errorf("resolve SSM endpoint: %w", err)
 	}
@@ -154,7 +161,7 @@ func (s *SSM) localPort(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	if s.Report != nil {
-		s.Report(fmt.Sprintf("localhost:%d is already in use, probably by another pg-tunnel session; this session uses localhost:%d", s.LocalPort, port))
+		s.Report(fmt.Sprintf("127.0.0.1:%d is already in use, probably by another pg-tunnel session; this session uses 127.0.0.1:%d", s.LocalPort, port))
 	}
 	return port, nil
 }
@@ -183,12 +190,19 @@ func (t *tunnel) Done() <-chan struct{} { return t.process.Done() }
 
 // Err reports plugin failure.
 func (t *tunnel) Err() error {
+	if reason := t.logs.stopReason(); reason != "" {
+		return errors.New(reason)
+	}
 	err := t.process.Err()
 	if err == nil {
 		err = errors.New("unexpected successful exit")
 	}
 	// The child's exit status is not the user's command status, so it is not wrapped.
-	return fmt.Errorf("embedded SSM child exited: %s: %s", t.logs.String(), err.Error())
+	message := "SSM port forwarding exited: " + err.Error()
+	if lines := t.logs.lastLines(5); lines != "" {
+		message += "; last log lines: " + lines
+	}
+	return errors.New(message)
 }
 
 // Close terminates both the local plugin and remote session.
@@ -219,19 +233,41 @@ func (t *tunnel) terminateRemote(ctx context.Context) error {
 		return nil
 	}
 	terminationErr := fmt.Errorf("terminate SSM session %s: %w", t.sessionID, err)
+	// The session reaches history a few seconds after the plugin stops.
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		ended, err := t.ended(ctx)
+		switch {
+		case ended:
+			return nil
+		case ctx.Err() != nil:
+			return terminationErr
+		case err != nil:
+			return errors.Join(terminationErr, fmt.Errorf("confirm SSM session termination (requires ssm:DescribeSessions): %w", err))
+		}
+		select {
+		case <-ctx.Done():
+			return terminationErr
+		case <-ticker.C:
+		}
+	}
+}
+
+func (t *tunnel) ended(ctx context.Context) (bool, error) {
 	history, err := t.api.DescribeSessions(ctx, &ssm.DescribeSessionsInput{
 		State:   types.SessionStateHistory,
 		Filters: []types.SessionFilter{{Key: types.SessionFilterKeySessionId, Value: aws.String(t.sessionID)}},
 	})
 	if err != nil {
-		return errors.Join(terminationErr, fmt.Errorf("confirm SSM session termination (requires ssm:DescribeSessions): %w", err))
+		return false, err //nolint:wrapcheck // terminateRemote adds the context.
 	}
 	for _, item := range history.Sessions {
 		if aws.ToString(item.SessionId) == t.sessionID && item.Status == types.SessionStatusTerminated {
-			return nil
+			return true, nil
 		}
 	}
-	return terminationErr
+	return false, nil
 }
 
 func (t *tunnel) waitReady(ctx context.Context) error {
@@ -240,7 +276,7 @@ func (t *tunnel) waitReady(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("waiting for local tunnel listener; check the SSM agent, embedded child, and remote connectivity: %w", ctx.Err())
+			return fmt.Errorf("local tunnel did not open (%w); check that the jump host is online in SSM (aws ssm describe-instance-information) and can reach the database", ctx.Err())
 		case <-t.Done():
 			return t.Err()
 		case <-ticker.C:
@@ -261,6 +297,7 @@ type logTail struct {
 	token   string
 	text    string
 	pending string
+	stop    string
 	mu      sync.Mutex
 }
 
@@ -281,6 +318,9 @@ func (l *logTail) Write(data []byte) (int, error) {
 		if l.report != nil && (line == ssmplugin.RecoveryStarted || line == ssmplugin.RecoveryResumed) {
 			l.report(line)
 		}
+		if ssmplugin.StopReason(line) {
+			l.stop = line
+		}
 	}
 	if len(l.pending) > 8192 {
 		l.pending = ""
@@ -291,8 +331,20 @@ func (l *logTail) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
-func (l *logTail) String() string {
+func (l *logTail) stopReason() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return strings.TrimSpace(l.text)
+	return l.stop
+}
+
+func (l *logTail) lastLines(count int) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var lines []string
+	for line := range strings.SplitSeq(l.text, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines[max(0, len(lines)-count):], "; ")
 }

@@ -38,13 +38,25 @@ func Verify(ctx context.Context, target session.Target, port int, credential ses
 		err = conn.Close(verifyCtx)
 	}
 	if err != nil {
-		hint := "check CA, secret username/password, and database password authentication; RDS users with rds_iam must use IAM"
-		if !credential.ExpiresAt.IsZero() {
-			hint = "check CA, rds-db:connect, and database user rds_iam membership"
-		}
-		return fmt.Errorf("TLS/database connection failed (%s): %s", hint, strings.ReplaceAll(err.Error(), credential.Secret, "[redacted]"))
+		return connectionError(err, credential)
 	}
 	return nil
+}
+
+func connectionError(err error, credential session.Credential) error {
+	var pgError *pgconn.PgError
+	if errors.As(err, &pgError) && (pgError.Code == "28P01" || pgError.Code == "28000") {
+		hint := "check that the secret's password matches the database; users with rds_iam must use IAM authentication"
+		if !credential.ExpiresAt.IsZero() {
+			hint = "check rds-db:connect for this user and that the user has the rds_iam role"
+		}
+		return fmt.Errorf("database rejected login: %s; %s", strings.ReplaceAll(pgError.Message, credential.Secret, "[redacted]"), hint)
+	}
+	hint := "check CA, secret username/password, and database password authentication; RDS users with rds_iam must use IAM"
+	if !credential.ExpiresAt.IsZero() {
+		hint = "check CA, rds-db:connect, and database user rds_iam membership"
+	}
+	return fmt.Errorf("TLS/database connection failed (%s): %s", hint, strings.ReplaceAll(err.Error(), credential.Secret, "[redacted]"))
 }
 
 func verificationConfig(target session.Target, port int, credential session.Credential) (*pgconn.Config, error) {

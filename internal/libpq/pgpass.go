@@ -14,13 +14,10 @@ import (
 	"github.com/vertti/pg-tunnel/internal/atomicfile"
 )
 
-// sharedLines returns the managed ~/.pgpass entries for clients that connect to localhost.
-func (c *client) sharedLines(secret string) []string {
-	lines := make([]string, 0, 2)
-	for _, host := range []string{"localhost", "127.0.0.1"} {
-		lines = append(lines, pgpassLine(host, strconv.Itoa(c.port), c.target.Database, c.target.User, secret))
-	}
-	return lines
+// localLines returns the password entry for clients that connect to 127.0.0.1.
+// localhost is left out: it may resolve to ::1, where another local user can listen.
+func (c *client) localLines(secret string) []string {
+	return []string{pgpassLine("127.0.0.1", strconv.Itoa(c.port), c.target.Database, c.target.User, secret)}
 }
 
 func pgpassLine(fields ...string) string {
@@ -56,17 +53,33 @@ func endMarker(session string) string { return "# pg-tunnel " + session + " end"
 // editShared replaces the session's block at the top of the shared password file,
 // or removes it when lines is nil, and leaves every other line unchanged.
 func editShared(path, lockPath, session string, lines []string) error {
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDONLY, 0o600) //nolint:gosec // The lock lives in private session storage.
+	lock, err := lockShared(lockPath)
 	if err != nil {
-		return fmt.Errorf("open shared password file lock: %w", err)
+		return err
 	}
 	defer lock.Close() //nolint:errcheck // Closing releases the advisory lock.
+	return rewriteShared(resolve(path), session, lines)
+}
+
+func lockShared(lockPath string) (*os.File, error) {
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDONLY, 0o600) //nolint:gosec // The lock lives in private session storage.
+	if err != nil {
+		return nil, fmt.Errorf("open shared password file lock: %w", err)
+	}
 	if err = unix.Flock(int(lock.Fd()), unix.LOCK_EX); err != nil {
-		return fmt.Errorf("lock shared password file: %w", err)
+		return nil, errors.Join(fmt.Errorf("lock shared password file: %w", err), lock.Close())
 	}
-	if resolved, resolveErr := filepath.EvalSymlinks(path); resolveErr == nil {
-		path = resolved
+	return lock, nil
+}
+
+func resolve(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
 	}
+	return path
+}
+
+func rewriteShared(path, session string, lines []string) error {
 	data, err := os.ReadFile(path) //nolint:gosec // The path is the user's own password file.
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read %s: %w", path, err)
@@ -117,12 +130,22 @@ func blockSession(line string) (string, bool) {
 	return name, ok && strings.HasPrefix(rest, "begin ")
 }
 
-// recoverShared removes blocks for sessions whose private directory is gone.
+// recoverShared removes blocks for sessions whose private directory is gone, and
+// copies of the password file left by a killed write.
 func recoverShared(path, lockPath, root string) error {
-	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return nil
+	lock, err := lockShared(lockPath)
+	if err != nil {
+		return err
+	}
+	defer lock.Close() //nolint:errcheck // Closing releases the advisory lock.
+	path = resolve(path)
+	if err = atomicfile.RemoveLeftovers(path); err != nil {
+		return fmt.Errorf("clean up after %s: %w", path, err)
 	}
 	data, err := os.ReadFile(path) //nolint:gosec // The path is the user's own password file.
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
@@ -132,8 +155,8 @@ func recoverShared(path, lockPath, root string) error {
 			continue
 		}
 		if _, statErr := os.Stat(filepath.Join(root, name)); errors.Is(statErr, os.ErrNotExist) {
-			if editErr := editShared(path, lockPath, name, nil); editErr != nil {
-				return editErr
+			if rewriteErr := rewriteShared(path, name, nil); rewriteErr != nil {
+				return rewriteErr
 			}
 		}
 	}

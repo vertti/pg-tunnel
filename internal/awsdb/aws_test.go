@@ -17,6 +17,7 @@ import (
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/ssm/types"
+	"github.com/aws/smithy-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -65,7 +66,12 @@ func TestJumpHostRejectsAmbiguityAcrossPages(t *testing.T) {
 		return output, nil
 	})
 	_, err := awsdb.JumpHost(t.Context(), api, &profile.Profile{JumpTag: "jump"})
-	require.ErrorContains(t, err, "found 2")
+	require.EqualError(t, err, `2 running instances have Name="jump" (i-example, i-example); set target to one of them`)
+	none := ec2Func(func(context.Context, *ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error) {
+		return &ec2.DescribeInstancesOutput{}, nil
+	})
+	_, err = awsdb.JumpHost(t.Context(), none, &profile.Profile{JumpTag: "jump"})
+	require.EqualError(t, err, `no running instance has Name="jump"; check jump_tag and the region, or set target to the jump host's instance ID`)
 }
 
 func TestIAMSignsRemoteEndpointAndReportsExpiry(t *testing.T) {
@@ -115,11 +121,16 @@ type fakeSSM struct {
 	historyErr     error
 	terminated     string
 	history        []types.Session
+	historyDelay   int
 	terminateTime  time.Duration
 }
 
 func (f *fakeSSM) DescribeSessions(_ context.Context, input *ssm.DescribeSessionsInput, _ ...func(*ssm.Options)) (*ssm.DescribeSessionsOutput, error) {
 	f.historyInput = input
+	if f.historyDelay > 0 {
+		f.historyDelay--
+		return &ssm.DescribeSessionsOutput{}, f.historyErr
+	}
 	return &ssm.DescribeSessionsOutput{Sessions: f.history}, f.historyErr
 }
 
@@ -172,10 +183,13 @@ func TestRemoteCleanupConfirmsFailedTermination(t *testing.T) {
 		name           string
 		id             string
 		status         types.SessionStatus
+		historyDelay   int
 		wantFailure    bool
 	}{
 		{name: "accepted"},
 		{name: "already terminated", terminationErr: failure, id: "session-example", status: types.SessionStatusTerminated},
+		{name: "terminated shortly after", terminationErr: failure, id: "session-example", status: types.SessionStatusTerminated, historyDelay: 4},
+		{name: "terminated too late", terminationErr: failure, id: "session-example", status: types.SessionStatusTerminated, historyDelay: 20, wantFailure: true},
 		{name: "still terminating", terminationErr: failure, id: "session-example", status: types.SessionStatusTerminating, wantFailure: true},
 		{name: "different session", terminationErr: failure, id: "other", status: types.SessionStatusTerminated, wantFailure: true},
 		{name: "no history", terminationErr: failure, wantFailure: true},
@@ -183,12 +197,15 @@ func TestRemoteCleanupConfirmsFailedTermination(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			api := &fakeSSM{terminationErr: test.terminationErr, historyErr: test.historyErr}
+			api := &fakeSSM{terminationErr: test.terminationErr, historyErr: test.historyErr, historyDelay: test.historyDelay}
 			if test.id != "" {
 				api.history = []types.Session{{SessionId: aws.String(test.id), Status: test.status}}
 			}
 			transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: filepath.Join(t.TempDir(), "missing")}
-			_, err := transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
+			var err error
+			synctest.Test(t, func(t *testing.T) {
+				_, err = transport.Open(t.Context(), session.Target{Host: "db.example", Port: 5432})
+			})
 			require.ErrorContains(t, err, "launch embedded SSM child")
 			if test.wantFailure {
 				require.ErrorIs(t, err, failure)
@@ -233,7 +250,7 @@ func TestIAMReportsCredentialExpiryKnowledge(t *testing.T) {
 	}{
 		{"expiring", "AWS credentials expire " + expiry.Format(time.RFC3339), aws.Credentials{CanExpire: true, Expires: expiry}},
 		{"unknown temporary", "static environment credentials cannot be renewed", aws.Credentials{SessionToken: "token"}},
-		{"long-term", "expiry is not reported", aws.Credentials{}},
+		{"long-term", "", aws.Credentials{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -244,6 +261,10 @@ func TestIAMReportsCredentialExpiryKnowledge(t *testing.T) {
 			for range 2 {
 				_, err := auth.Credential(t.Context(), session.Target{Host: "db.example", Port: 5432, User: "reader"})
 				require.NoError(t, err)
+			}
+			if tc.want == "" {
+				assert.Empty(t, reported)
+				return
 			}
 			require.Len(t, reported, 1, "renewals with the same AWS credentials report once")
 			assert.Contains(t, reported[0], tc.want)
@@ -285,7 +306,7 @@ func TestRDSDiscoveryRejectsUnusableInstances(t *testing.T) {
 		name, want string
 		instances  []rdstypes.DBInstance
 	}{
-		{name: "API failure", err: errors.New("AccessDenied"), want: "rds:DescribeDBInstances permission"},
+		{name: "API failure", err: &smithy.GenericAPIError{Code: "DBInstanceNotFound", Message: "DBInstance example not found."}, want: "failed: DBInstance example not found. Check the instance name"},
 		{name: "no instance", want: "found 0"},
 		{name: "other engine", instances: []rdstypes.DBInstance{{Engine: aws.String("mysql")}}, want: "Aurora PostgreSQL instances are supported"},
 		{name: "no endpoint", instances: []rdstypes.DBInstance{{Engine: aws.String("postgres"), IAMDatabaseAuthenticationEnabled: aws.Bool(true)}}, want: "usable database endpoint"},

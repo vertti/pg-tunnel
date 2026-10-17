@@ -27,7 +27,7 @@ Usage:
   pg-tunnel run [--config PATH] CONNECTION -- COMMAND [ARGS...]
       Open a tunnel, run COMMAND with libpq settings, and clean up when it exits.
   pg-tunnel connect [--config PATH] CONNECTION
-      Keep a tunnel open and print settings for separately launched clients.
+      Keep a tunnel open for separately launched clients such as Postico and scripts.
   pg-tunnel check [--config PATH] CONNECTION
       Verify a saved connection and clean up before exiting.
   pg-tunnel init [--aws-profile PROFILE] [--region REGION] [--config PATH] [--sslrootcert PEM]
@@ -46,8 +46,8 @@ func usageError(command, format string, args ...any) error {
 	return usageErr(fmt.Sprintf(format, args...) + " (see " + strings.TrimSpace("pg-tunnel "+command) + " --help)")
 }
 
-// RunContext executes commands until completion or cancellation. Requested help,
-// the version, and connect's client settings go to stdout; everything else to stderr.
+// RunContext executes commands until completion or cancellation. Requested help
+// and the version go to stdout; everything else to stderr.
 func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usageError("", "missing command")
