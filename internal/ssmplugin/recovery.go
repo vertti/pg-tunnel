@@ -75,11 +75,14 @@ type recoverySocket struct {
 // SetOnError keeps the preinstalled callback when AWS installs its finite retry loop.
 func (*recoverySocket) SetOnError(func(error)) {}
 
-const recoveryExpired = "SSM recovery exceeded 1 minute. Check network access and AWS login, then rerun your pg-tunnel command"
+const (
+	recoveryExpired = "SSM recovery exceeded 1 minute. Check network access and AWS login, then rerun your pg-tunnel command"
+	resumeRejected  = "SSM resume rejected"
+)
 
 // StopReason reports whether a child output line explains why the tunnel stopped.
 func StopReason(line string) bool {
-	return strings.HasPrefix(line, "SSM recovery exceeded") || strings.HasPrefix(line, "SSM resume rejected")
+	return strings.HasPrefix(line, recoveryExpired) || strings.HasPrefix(line, resumeRejected)
 }
 
 func resumeWithin(ctx context.Context, resume func() error) error {
@@ -98,7 +101,7 @@ func resumeWithin(ctx context.Context, resume func() error) error {
 				return nil
 			}
 			if reason := terminalResumeError(err); reason != "" {
-				return fmt.Errorf("SSM resume rejected: %s. Check AWS login and session access, then rerun your pg-tunnel command", reason)
+				return fmt.Errorf(resumeRejected+": %s. Check AWS login and session access, then rerun your pg-tunnel command", reason)
 			}
 		}
 		timer := time.NewTimer(delay)
