@@ -80,6 +80,9 @@ func reporter(output io.Writer) func(string) {
 
 const setupTimeout = 30 * time.Second
 
+// configureRunner lets scenario tests replace the SSM transport and shorten polling.
+var configureRunner = func(*session.Runner) {}
+
 var sessionSyntax = map[string]string{
 	"run":     "run [--config PATH] CONNECTION -- COMMAND [ARGS...]",
 	"connect": "connect [--config PATH] CONNECTION",
@@ -174,6 +177,7 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 		Clients:   files, Verify: libpq.Verify, Env: os.Environ(), Report: report,
 		Command: command,
 	}
+	configureRunner(&runner)
 	if err = runner.Run(ctx); err != nil {
 		return fmt.Errorf("database session: %w", err)
 	}

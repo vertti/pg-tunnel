@@ -78,6 +78,8 @@ type Runner struct {
 	Command   Command
 	Report    func(string)
 	Env       []string
+	// PasswordPoll of zero checks every 5 minutes.
+	PasswordPoll time.Duration
 }
 
 // Run starts a database session, runs its command, and closes every resource.
@@ -139,15 +141,15 @@ func (r *Runner) runCommand(ctx context.Context, target Target, tunnel Tunnel, c
 }
 
 const (
-	passwordPoll   = 5 * time.Minute
-	renewalMargin  = 3 * time.Minute
-	minimumRenewal = 30 * time.Second
+	defaultPasswordPoll = 5 * time.Minute
+	renewalMargin       = 3 * time.Minute
+	minimumRenewal      = 30 * time.Second
 	// Monotonic timers pause while macOS sleeps, so waits are re-checked against the wall clock.
 	wallClockCheck = time.Minute
 )
 
 func (r *Runner) refresh(ctx context.Context, target Target, port int, client Client, current Credential) {
-	due := renewalTime(current)
+	due := r.renewalTime(current)
 	backoff := 5 * time.Second
 	for {
 		if !sleepUntil(ctx, due) {
@@ -166,7 +168,7 @@ func (r *Runner) refresh(ctx context.Context, target Target, port int, client Cl
 		rotated := next.Secret != current.Secret
 		current = next
 		backoff = 5 * time.Second
-		due = renewalTime(current)
+		due = r.renewalTime(current)
 		switch {
 		case !current.ExpiresAt.IsZero():
 			r.reportExpiry(current)
@@ -211,10 +213,17 @@ func (r *Runner) renew(ctx context.Context, target Target, port int, client Clie
 	return credential, nil
 }
 
-func renewalTime(credential Credential) time.Time {
+func (r *Runner) passwordPoll() time.Duration {
+	if r.PasswordPoll > 0 {
+		return r.PasswordPoll
+	}
+	return defaultPasswordPoll
+}
+
+func (r *Runner) renewalTime(credential Credential) time.Time {
 	now := time.Now().Round(0)
 	if credential.ExpiresAt.IsZero() {
-		return now.Add(passwordPoll)
+		return now.Add(r.passwordPoll())
 	}
 	earliest := now.Add(minimumRenewal)
 	if renewal := credential.ExpiresAt.Round(0).Add(-renewalMargin); renewal.After(earliest) {
@@ -231,10 +240,10 @@ func (r *Runner) report(message string) {
 
 func (r *Runner) reportExpiry(credential Credential) {
 	if credential.ExpiresAt.IsZero() {
-		r.report(fmt.Sprintf("Secrets Manager password loaded%s; checking for rotation every %s. New connections may fail between rotation and refresh.", createdAt(credential), passwordPoll))
+		r.report(fmt.Sprintf("Secrets Manager password loaded%s; checking for rotation every %s. New connections may fail between rotation and refresh.", createdAt(credential), r.passwordPoll()))
 		return
 	}
-	r.report(fmt.Sprintf("IAM token expires %s; refresh in %s. Token expiry does not close established connections.", credential.ExpiresAt.Format(time.RFC3339), time.Until(renewalTime(credential)).Round(time.Second)))
+	r.report(fmt.Sprintf("IAM token expires %s; refresh in %s. Token expiry does not close established connections.", credential.ExpiresAt.Format(time.RFC3339), time.Until(r.renewalTime(credential)).Round(time.Second)))
 }
 
 func createdAt(credential Credential) string {
