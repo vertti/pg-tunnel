@@ -83,7 +83,7 @@ func TestUsageMistakesExplainTheFix(t *testing.T) {
 func TestRunChecksCommandBeforeConnecting(t *testing.T) {
 	t.Parallel()
 	err := cli.RunContext(t.Context(), []string{"run", "--config", "/nonexistent/pg-tunnel.json", "dev", "--", "pg-tunnel-missing-command"}, io.Discard, io.Discard)
-	require.ErrorContains(t, err, "find command before connecting")
+	require.ErrorContains(t, err, `cannot run "pg-tunnel-missing-command"`)
 	require.NotErrorIs(t, err, cli.ErrUsage)
 }
 

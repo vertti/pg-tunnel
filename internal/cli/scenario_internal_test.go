@@ -387,11 +387,12 @@ func TestScenarioAWSFailuresAtStartup(t *testing.T) {
 		},
 		{
 			name: "session denied", action: "ssm:StartSession",
-			want: "database session: open tunnel: SSM StartSession for i-scenario was denied: " + deniedPrefix + "ssm:StartSession because no identity-based policy allows the ssm:StartSession action",
+			want: "open tunnel: SSM StartSession for i-scenario was denied: " + deniedPrefix + "ssm:StartSession because no identity-based policy allows the ssm:StartSession action. " +
+				"The AWS role needs ssm:StartSession on the jump host and on the AWS-StartPortForwardingSessionToRemoteHost document",
 		},
 		{
 			name: "secret denied", action: "secretsmanager:GetSecretValue",
-			want: `database session: obtain database credential: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 was denied: ` + deniedPrefix + "secretsmanager:GetSecretValue because no identity-based policy allows the secretsmanager:GetSecretValue action. The AWS role needs secretsmanager:GetSecretValue on the secret, and kms:Decrypt if it uses a customer-managed key",
+			want: `obtain database credential: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 was denied: ` + deniedPrefix + "secretsmanager:GetSecretValue because no identity-based policy allows the secretsmanager:GetSecretValue action. The AWS role needs secretsmanager:GetSecretValue on the secret, and kms:Decrypt if it uses a customer-managed key",
 		},
 		{
 			name: "instance not found", action: "rds:DescribeDBInstances", code: "DBInstanceNotFound", message: "DBInstance app-db not found.", setup: func(p *profile.Profile) { p.Host, p.DBInstance = "", "app-db" },
@@ -403,11 +404,11 @@ func TestScenarioAWSFailuresAtStartup(t *testing.T) {
 		},
 		{
 			name: "secret not found", action: "secretsmanager:GetSecretValue", code: "ResourceNotFoundException", message: "Secrets Manager can't find the specified secret.",
-			want: `database session: obtain database credential: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 failed: Secrets Manager can't find the specified secret. Check secret_id, region and AWS profile`,
+			want: `obtain database credential: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 failed: Secrets Manager can't find the specified secret. Check secret_id, region and AWS profile`,
 		},
 		{
 			name: "jump host offline", action: "ssm:StartSession", code: "TargetNotConnected", message: "i-scenario is not connected.",
-			want: "database session: open tunnel: SSM StartSession for i-scenario failed: i-scenario is not connected. Check that the jump host is online in SSM (aws ssm describe-instance-information)",
+			want: "open tunnel: SSM StartSession for i-scenario failed: i-scenario is not connected. Check that the jump host is online in SSM (aws ssm describe-instance-information)",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -454,7 +455,7 @@ func TestScenarioSecretPasswordRejectedAtStartup(t *testing.T) {
 	s := newScenario(t)
 	s.aws.rotateSecret("not-the-database-password")
 	err := s.fail(s.secretsManagerProfile())
-	assert.EqualError(t, err, `database session: verify database authentication: database rejected login: password authentication failed for user "postgres"; check that the secret's password matches the database; users with rds_iam must use IAM authentication`)
+	assert.EqualError(t, err, `database rejected login: password authentication failed for user "postgres"; check that the secret's password matches the database; users with rds_iam must use IAM authentication`)
 }
 
 const networkHint = ". Check network access to AWS (VPN, proxy, firewall)"
@@ -467,8 +468,8 @@ func TestScenarioAWSUnresponsiveAtStartup(t *testing.T) {
 	}{
 		{"ec2:DescribeInstances", func(_ *scenario, p *profile.Profile) { p.Target, p.JumpTag = "", "bastion" }, `discover jump host in eu-west-1: EC2 DescribeInstances for Name="bastion" timed out`},
 		{"rds:DescribeDBInstances", func(_ *scenario, p *profile.Profile) { p.Host, p.DBInstance = "", "app-db" }, `discover database: RDS DescribeDBInstances for "app-db" in eu-west-1 timed out`},
-		{"ssm:StartSession", func(s *scenario, _ *profile.Profile) { s.ssm = true }, "database session: open tunnel: SSM StartSession for i-scenario timed out"},
-		{"secretsmanager:GetSecretValue", func(*scenario, *profile.Profile) {}, `database session: obtain database credential: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 timed out`},
+		{"ssm:StartSession", func(s *scenario, _ *profile.Profile) { s.ssm = true }, "open tunnel: SSM StartSession for i-scenario timed out"},
+		{"secretsmanager:GetSecretValue", func(*scenario, *profile.Profile) {}, `obtain database credential: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 timed out`},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			s := newScenario(t)

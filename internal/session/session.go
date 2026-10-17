@@ -105,8 +105,9 @@ func (r *Runner) Run(ctx context.Context) (result error) {
 	if err != nil {
 		return fmt.Errorf("obtain database credential: %w", err)
 	}
-	if err = r.Verify(startupCtx, target, tunnel.Port(), credential, r.report); err != nil {
-		return fmt.Errorf("verify database authentication: %w", err)
+	err = r.Verify(startupCtx, target, tunnel.Port(), credential, r.report)
+	if err != nil {
+		return err
 	}
 
 	r.report(fmt.Sprintf("Database authentication verified; tunnel: 127.0.0.1:%d", tunnel.Port()))
@@ -255,7 +256,7 @@ func (r *Runner) report(message string) {
 
 func (r *Runner) reportExpiry(credential Credential) {
 	if credential.ExpiresAt.IsZero() {
-		r.report(fmt.Sprintf("Secrets Manager password loaded%s; checking for rotation every %s. New connections may fail between rotation and refresh.", createdAt(credential), r.passwordPoll()))
+		r.report(fmt.Sprintf("Secrets Manager password loaded%s; checking for rotation every %s. New connections may fail between rotation and refresh.", createdAt(credential), plainDuration(r.passwordPoll())))
 		return
 	}
 	r.report(fmt.Sprintf("IAM token expires %s; refresh in %s. Token expiry does not close established connections.", credential.ExpiresAt.Format(time.RFC3339), time.Until(r.renewalTime(credential)).Round(time.Second)))
@@ -273,4 +274,14 @@ func credentialValidity(credential Credential) string {
 		return "New connections keep using the current password until refresh succeeds."
 	}
 	return "New connections keep using the current token until it expires at " + credential.ExpiresAt.Format(time.RFC3339) + "; open connections are unaffected."
+}
+
+func plainDuration(d time.Duration) string {
+	if d%time.Minute != 0 {
+		return d.String()
+	}
+	if d == time.Minute {
+		return "minute"
+	}
+	return fmt.Sprintf("%d minutes", d/time.Minute)
 }

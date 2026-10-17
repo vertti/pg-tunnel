@@ -369,7 +369,7 @@ func TestPasswordRotationVerifiesBeforePublishingAndRetainsPreviousOnFailure(t *
 			}
 		}
 		assert.Equal(t, []string{
-			"Secrets Manager password loaded; checking for rotation every 5m0s. New connections may fail between rotation and refresh.",
+			"Secrets Manager password loaded; checking for rotation every 5 minutes. New connections may fail between rotation and refresh.",
 			"Secrets Manager password rotated (created 2026-10-17T23:30:00Z); new connections use it.",
 		}, passwordMessages, "unchanged passwords are not re-reported")
 		mu.Unlock()

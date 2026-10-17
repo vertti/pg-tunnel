@@ -67,7 +67,7 @@ func (r *Resolver) resolveInstance(ctx context.Context, target session.Target) (
 		return target, errors.New("only RDS and Aurora PostgreSQL instances are supported; use an explicit host for other PostgreSQL endpoints")
 	}
 	if r.Profile.Auth != profile.AuthSecretsManager && !aws.ToBool(db.IAMDatabaseAuthenticationEnabled) {
-		return target, errors.New("IAM database authentication is disabled on this RDS instance")
+		return target, errors.New("IAM database authentication is disabled on this RDS instance; enable it on the instance, or use \"auth\": \"secrets-manager\" with secret_id")
 	}
 	if db.Endpoint == nil || aws.ToString(db.Endpoint.Address) == "" || aws.ToInt32(db.Endpoint.Port) <= 0 {
 		return target, errors.New("RDS did not return a usable database endpoint")
@@ -91,7 +91,7 @@ func (r *Resolver) resolveCluster(ctx context.Context, target session.Target) (s
 		return target, errors.New("db_cluster supports only Aurora PostgreSQL; use db_instance or an explicit host for other PostgreSQL endpoints")
 	}
 	if r.Profile.Auth != profile.AuthSecretsManager && !aws.ToBool(db.IAMDatabaseAuthenticationEnabled) {
-		return target, errors.New("IAM database authentication is disabled on this Aurora cluster")
+		return target, errors.New("IAM database authentication is disabled on this Aurora cluster; enable it on the cluster, or use \"auth\": \"secrets-manager\" with secret_id")
 	}
 	endpoint, kind := aws.ToString(db.Endpoint), profile.ClusterWriter
 	if r.Profile.ClusterEndpoint == profile.ClusterReader {
@@ -193,5 +193,5 @@ func credentialStatus(value *aws.Credentials, expiry time.Time) string {
 	if value.SessionToken != "" {
 		return "AWS temporary credential expiry is unknown; static environment credentials cannot be renewed. Use a refreshable AWS profile or aws-vault exec --server."
 	}
-	return "AWS credential expiry is not reported by the provider."
+	return ""
 }

@@ -250,7 +250,7 @@ func TestIAMReportsCredentialExpiryKnowledge(t *testing.T) {
 	}{
 		{"expiring", "AWS credentials expire " + expiry.Format(time.RFC3339), aws.Credentials{CanExpire: true, Expires: expiry}},
 		{"unknown temporary", "static environment credentials cannot be renewed", aws.Credentials{SessionToken: "token"}},
-		{"long-term", "expiry is not reported", aws.Credentials{}},
+		{"long-term", "", aws.Credentials{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -261,6 +261,10 @@ func TestIAMReportsCredentialExpiryKnowledge(t *testing.T) {
 			for range 2 {
 				_, err := auth.Credential(t.Context(), session.Target{Host: "db.example", Port: 5432, User: "reader"})
 				require.NoError(t, err)
+			}
+			if tc.want == "" {
+				assert.Empty(t, reported)
+				return
 			}
 			require.Len(t, reported, 1, "renewals with the same AWS credentials report once")
 			assert.Contains(t, reported[0], tc.want)
