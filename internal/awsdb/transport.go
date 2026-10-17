@@ -36,6 +36,7 @@ type SSM struct {
 	Region     string
 	Profile    string
 	Executable string // Overrides os.Executable for process test harnesses.
+	Endpoint   string // Overrides the default SSM endpoint for session recovery.
 	LocalPort  int
 }
 
@@ -140,7 +141,11 @@ func startChild(ctx context.Context, args []string, response []byte, handle *tun
 }
 
 func (s *SSM) pluginArgs(ctx context.Context, path string) ([]string, error) {
-	endpoint, err := ssm.NewDefaultEndpointResolverV2().ResolveEndpoint(ctx, ssm.EndpointParameters{Region: aws.String(s.Region)})
+	parameters := ssm.EndpointParameters{Region: aws.String(s.Region)}
+	if s.Endpoint != "" {
+		parameters.Endpoint = aws.String(s.Endpoint)
+	}
+	endpoint, err := ssm.NewDefaultEndpointResolverV2().ResolveEndpoint(ctx, parameters)
 	if err != nil {
 		return nil, fmt.Errorf("resolve SSM endpoint: %w", err)
 	}
@@ -185,12 +190,15 @@ func (t *tunnel) Done() <-chan struct{} { return t.process.Done() }
 
 // Err reports plugin failure.
 func (t *tunnel) Err() error {
+	if reason := t.logs.stopReason(); reason != "" {
+		return errors.New(reason)
+	}
 	err := t.process.Err()
 	if err == nil {
 		err = errors.New("unexpected successful exit")
 	}
 	// The child's exit status is not the user's command status, so it is not wrapped.
-	return fmt.Errorf("embedded SSM child exited: %s: %s", t.logs.String(), err.Error())
+	return fmt.Errorf("embedded SSM child exited: %s: %s", t.logs.lastLines(5), err.Error())
 }
 
 // Close terminates both the local plugin and remote session.
@@ -285,6 +293,7 @@ type logTail struct {
 	token   string
 	text    string
 	pending string
+	stop    string
 	mu      sync.Mutex
 }
 
@@ -305,6 +314,9 @@ func (l *logTail) Write(data []byte) (int, error) {
 		if l.report != nil && (line == ssmplugin.RecoveryStarted || line == ssmplugin.RecoveryResumed) {
 			l.report(line)
 		}
+		if ssmplugin.StopReason(line) {
+			l.stop = line
+		}
 	}
 	if len(l.pending) > 8192 {
 		l.pending = ""
@@ -315,8 +327,20 @@ func (l *logTail) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
-func (l *logTail) String() string {
+func (l *logTail) stopReason() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return strings.TrimSpace(l.text)
+	return l.stop
+}
+
+func (l *logTail) lastLines(count int) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var lines []string
+	for line := range strings.SplitSeq(l.text, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines[max(0, len(lines)-count):], "; ")
 }
