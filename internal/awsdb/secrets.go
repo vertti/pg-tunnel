@@ -43,7 +43,12 @@ func (s Secrets) Credential(ctx context.Context, target session.Target) (session
 	if output.SecretString == nil {
 		return session.Credential{}, errors.New("secret must contain a JSON SecretString; binary secrets are not supported")
 	}
-	return passwordCredential(*output.SecretString, target)
+	credential, err := passwordCredential(*output.SecretString, target)
+	if err != nil {
+		return session.Credential{}, err
+	}
+	credential.CreatedAt = aws.ToTime(output.CreatedDate)
+	return credential, nil
 }
 
 type databaseSecret struct {

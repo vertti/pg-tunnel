@@ -21,6 +21,7 @@ type Target struct {
 // Zero ExpiresAt denotes a password without a known expiry.
 type Credential struct {
 	ExpiresAt time.Time
+	CreatedAt time.Time
 	Secret    string
 }
 
@@ -162,10 +163,16 @@ func (r *Runner) refresh(ctx context.Context, target Target, port int, client Cl
 			backoff = min(backoff*2, time.Minute)
 			continue
 		}
+		rotated := next.Secret != current.Secret
 		current = next
 		backoff = 5 * time.Second
 		due = renewalTime(current)
-		r.reportExpiry(current)
+		switch {
+		case !current.ExpiresAt.IsZero():
+			r.reportExpiry(current)
+		case rotated:
+			r.report("Secrets Manager password rotated" + createdAt(current) + "; new connections use it.")
+		}
 	}
 }
 
@@ -224,10 +231,17 @@ func (r *Runner) report(message string) {
 
 func (r *Runner) reportExpiry(credential Credential) {
 	if credential.ExpiresAt.IsZero() {
-		r.report(fmt.Sprintf("Secrets Manager password loaded; expiry is not reported. Checking for rotation every %s. New connections may fail between rotation and refresh.", passwordPoll))
+		r.report(fmt.Sprintf("Secrets Manager password loaded%s; checking for rotation every %s. New connections may fail between rotation and refresh.", createdAt(credential), passwordPoll))
 		return
 	}
 	r.report(fmt.Sprintf("IAM token expires %s; refresh in %s. Token expiry does not close established connections.", credential.ExpiresAt.Format(time.RFC3339), time.Until(renewalTime(credential)).Round(time.Second)))
+}
+
+func createdAt(credential Credential) string {
+	if credential.CreatedAt.IsZero() {
+		return ""
+	}
+	return " (created " + credential.CreatedAt.Format(time.RFC3339) + ")"
 }
 
 func credentialValidity(credential Credential) string {

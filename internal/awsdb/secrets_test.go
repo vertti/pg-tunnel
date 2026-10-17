@@ -41,7 +41,7 @@ func TestSecretsValidateWithoutLeakingValues(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			payload, err := json.Marshal(map[string]string{"SecretString": tc.value})
+			payload, err := json.Marshal(map[string]any{"SecretString": tc.value, "CreatedDate": 1792280000})
 			require.NoError(t, err)
 			auth := secretAuth(t, http.StatusOK, string(payload))
 			credential, err := auth.Credential(t.Context(), session.Target{Host: "db.example", Port: 5432, User: "reader"})
@@ -54,6 +54,7 @@ func TestSecretsValidateWithoutLeakingValues(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, `test:password\value`, credential.Secret)
 			assert.True(t, credential.ExpiresAt.IsZero())
+			assert.Equal(t, int64(1792280000), credential.CreatedAt.Unix())
 		})
 	}
 }

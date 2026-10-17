@@ -287,11 +287,10 @@ func TestPasswordRotationVerifiesBeforePublishingAndRetainsPreviousOnFailure(t *
 			mu.Lock()
 			defer mu.Unlock()
 			calls++
-			value := "original"
 			if calls >= 3 {
-				value = "rotated"
+				return session.Credential{Secret: "rotated", CreatedAt: time.Date(2026, 10, 17, 23, 30, 0, 0, time.UTC)}, nil
 			}
-			return session.Credential{Secret: value}, nil
+			return session.Credential{Secret: "original"}, nil
 		})
 		runner.Verify = func(_ context.Context, _ session.Target, _ int, _ session.Credential, report func(string)) error {
 			mu.Lock()
@@ -327,6 +326,16 @@ func TestPasswordRotationVerifiesBeforePublishingAndRetainsPreviousOnFailure(t *
 		synctest.Wait()
 		mu.Lock()
 		assert.Equal(t, []string{"rotated"}, published)
+		passwordMessages := []string{}
+		for _, message := range messages {
+			if strings.HasPrefix(message, "Secrets Manager password") {
+				passwordMessages = append(passwordMessages, message)
+			}
+		}
+		assert.Equal(t, []string{
+			"Secrets Manager password loaded; checking for rotation every 5m0s. New connections may fail between rotation and refresh.",
+			"Secrets Manager password rotated (created 2026-10-17T23:30:00Z); new connections use it.",
+		}, passwordMessages, "unchanged passwords are not re-reported")
 		mu.Unlock()
 		require.NoError(t, stop())
 		assert.Equal(t, []string{"client closed", "tunnel closed"}, *events)
