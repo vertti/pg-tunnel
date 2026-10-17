@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -35,7 +36,7 @@ type scenario struct {
 	mu       sync.Mutex
 	messages []string
 	env      []string
-	ssm      bool
+	realSSM  bool
 }
 
 func newScenario(t *testing.T) *scenario {
@@ -53,7 +54,7 @@ func newScenario(t *testing.T) *scenario {
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
 	t.Setenv("AWS_MAX_ATTEMPTS", "1")
 	configureRunner = func(runner *session.Runner) {
-		if !s.ssm {
+		if !s.realSSM {
 			runner.Transport = directTransport{port: s.postgres.Port}
 		}
 		runner.PasswordPoll = 200 * time.Millisecond
@@ -149,10 +150,15 @@ func (s *scenario) output() string {
 	return strings.Join(s.messages, "\n")
 }
 
-func (s *scenario) waitForMessage(substring string) {
+func (s *scenario) waitForMessage(message string) {
 	s.t.Helper()
-	if !assert.Eventually(s.t, func() bool { return strings.Contains(s.output(), substring) }, 20*time.Second, 50*time.Millisecond) {
-		s.t.Fatalf("waiting for %q in:\n%s", substring, s.output())
+	reported := func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return slices.Contains(s.messages, message)
+	}
+	if !assert.Eventually(s.t, reported, 20*time.Second, 50*time.Millisecond) {
+		s.t.Fatalf("waiting for %q in:\n%s", message, s.output())
 	}
 }
 
@@ -348,18 +354,19 @@ func TestScenarioSecretRotation(t *testing.T) {
 	s := newScenario(t)
 	s.start(s.secretsManagerProfile())
 	require.NoError(t, s.psql("SELECT 1"))
-	s.waitForMessage("Secrets Manager password loaded (created 2026-10-17T12:00:00Z)")
+	s.waitForMessage("Secrets Manager password loaded (created 2026-10-17T12:00:00Z); checking for rotation every 200ms. New connections may fail between rotation and refresh.")
 
 	s.setDatabasePassword("rotated-once")
 	s.aws.rotateSecret("rotated-once")
-	s.waitForMessage("Secrets Manager password rotated (created 2026-10-17T12:01:00Z)")
+	s.waitForMessage("Secrets Manager password rotated (created 2026-10-17T12:01:00Z); new connections use it.")
 	require.NoError(t, s.psql("SELECT 1"), "new connections use the rotated password")
 
 	s.aws.rotateSecret("rotated-twice")
-	s.waitForMessage("New connections keep using the current password")
+	s.waitForMessage(`Credential refresh failed: database rejected login: password authentication failed for user "postgres"; ` +
+		"check that the secret's password matches the database; users with rds_iam must use IAM authentication." + keepsCurrentPassword)
 	require.NoError(t, s.psql("SELECT 1"), "a password the database rejects is never published")
 	s.setDatabasePassword("rotated-twice")
-	s.waitForMessage("Secrets Manager password rotated (created 2026-10-17T12:02:00Z)")
+	s.waitForMessage("Secrets Manager password rotated (created 2026-10-17T12:02:00Z); new connections use it.")
 	require.NoError(t, s.psql("SELECT 1"))
 
 	assert.Equal(t, 1, strings.Count(s.output(), "Secrets Manager password loaded"), "unchanged passwords are not re-reported")
@@ -413,7 +420,7 @@ func TestScenarioAWSFailuresAtStartup(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newScenario(t)
-			s.ssm = tc.action == "ssm:StartSession"
+			s.realSSM = tc.action == "ssm:StartSession"
 			p := s.secretsManagerProfile()
 			if tc.setup != nil {
 				tc.setup(p)
@@ -434,7 +441,7 @@ func TestScenarioSSOLoginExpiresMidSession(t *testing.T) {
 	expireAt := s.ssoLogin(p)
 	s.start(p)
 	expireAt(time.Now().Add(-time.Minute))
-	s.waitForMessage("Credential refresh failed: AWS SSO login for profile dev has expired; run aws sso login --profile dev. New connections keep using the current password until refresh succeeds. pg-tunnel keeps retrying and reports when refresh recovers.")
+	s.waitForMessage("Credential refresh failed: AWS SSO login for profile dev has expired; run aws sso login --profile dev." + keepsCurrentPassword)
 	require.NoError(t, s.psql("SELECT 1"))
 	expireAt(time.Now().Add(time.Hour))
 	s.waitForMessage("Credential refresh recovered.")
@@ -445,7 +452,7 @@ func TestScenarioSecretAccessLostMidSession(t *testing.T) {
 	s := newScenario(t)
 	s.start(s.secretsManagerProfile())
 	s.aws.deny("secretsmanager:GetSecretValue")
-	s.waitForMessage(`Credential refresh failed: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 was denied: ` + deniedPrefix + "secretsmanager:GetSecretValue because no identity-based policy allows the secretsmanager:GetSecretValue action. The AWS role needs secretsmanager:GetSecretValue on the secret, and kms:Decrypt if it uses a customer-managed key. New connections keep using the current password until refresh succeeds.")
+	s.waitForMessage(`Credential refresh failed: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 was denied: ` + deniedPrefix + "secretsmanager:GetSecretValue because no identity-based policy allows the secretsmanager:GetSecretValue action. The AWS role needs secretsmanager:GetSecretValue on the secret, and kms:Decrypt if it uses a customer-managed key." + keepsCurrentPassword)
 	require.NoError(t, s.psql("SELECT 1"))
 	s.aws.fail("secretsmanager:GetSecretValue", "", "")
 	s.waitForMessage("Credential refresh recovered.")
@@ -458,6 +465,8 @@ func TestScenarioSecretPasswordRejectedAtStartup(t *testing.T) {
 	assert.EqualError(t, err, `database rejected login: password authentication failed for user "postgres"; check that the secret's password matches the database; users with rds_iam must use IAM authentication`)
 }
 
+const keepsCurrentPassword = " New connections keep using the current password until refresh succeeds. pg-tunnel keeps retrying and reports when refresh recovers."
+
 const networkHint = ". Check network access to AWS (VPN, proxy, firewall)"
 
 func TestScenarioAWSUnresponsiveAtStartup(t *testing.T) {
@@ -468,11 +477,17 @@ func TestScenarioAWSUnresponsiveAtStartup(t *testing.T) {
 	}{
 		{"ec2:DescribeInstances", func(_ *scenario, p *profile.Profile) { p.Target, p.JumpTag = "", "bastion" }, `discover jump host in eu-west-1: EC2 DescribeInstances for Name="bastion" timed out`},
 		{"rds:DescribeDBInstances", func(_ *scenario, p *profile.Profile) { p.Host, p.DBInstance = "", "app-db" }, `discover database: RDS DescribeDBInstances for "app-db" in eu-west-1 timed out`},
-		{"ssm:StartSession", func(s *scenario, _ *profile.Profile) { s.ssm = true }, "open tunnel: SSM StartSession for i-scenario timed out"},
+		{"ssm:StartSession", func(s *scenario, _ *profile.Profile) { s.realSSM = true }, "open tunnel: SSM StartSession for i-scenario timed out"},
 		{"secretsmanager:GetSecretValue", func(*scenario, *profile.Profile) {}, `obtain database credential: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 timed out`},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			s := newScenario(t)
+			setupTimeout = 500 * time.Millisecond
+			configure := configureRunner
+			configureRunner = func(runner *session.Runner) {
+				configure(runner)
+				runner.StartupTimeout = 500 * time.Millisecond
+			}
 			p := s.secretsManagerProfile()
 			tc.setup(s, p)
 			s.aws.hang(tc.action, true)
@@ -493,20 +508,23 @@ func TestScenarioAWSUnresponsiveMidSession(t *testing.T) {
 	s := newScenario(t)
 	s.start(s.secretsManagerProfile())
 	s.aws.hang("secretsmanager:GetSecretValue", true)
-	s.waitForMessage(`Credential refresh failed: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 timed out` + networkHint + ". New connections keep using the current password until refresh succeeds.")
+	s.waitForMessage(`Credential refresh failed: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 timed out` + networkHint + "." + keepsCurrentPassword)
 	require.NoError(t, s.psql("SELECT 1"))
 	s.aws.hang("secretsmanager:GetSecretValue", false)
 	s.waitForMessage("Credential refresh recovered.")
 }
 
 func TestScenarioSSMResumeUsesTheConfiguredEndpoint(t *testing.T) {
-	for name, env := range map[string]string{"AWS_ENDPOINT_URL": "", "AWS_ENDPOINT_URL_SSM": "https://ssm.vpce.example"} {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct{ name, ssmEndpoint string }{
+		{"shared endpoint", ""},
+		{"SSM-specific endpoint", "https://ssm.vpce.example"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			s := newScenario(t)
 			want := os.Getenv("AWS_ENDPOINT_URL")
-			if env != "" {
-				t.Setenv(name, env)
-				want = env
+			if tc.ssmEndpoint != "" {
+				t.Setenv("AWS_ENDPOINT_URL_SSM", tc.ssmEndpoint)
+				want = tc.ssmEndpoint
 			}
 			var endpoint string
 			configureRunner = func(runner *session.Runner) {
@@ -519,4 +537,12 @@ func TestScenarioSSMResumeUsesTheConfiguredEndpoint(t *testing.T) {
 			assert.Equal(t, want, endpoint)
 		})
 	}
+}
+
+func TestScenarioCheckPasses(t *testing.T) {
+	s := newScenario(t)
+	var output strings.Builder
+	require.NoError(t, checkConnection(t.Context(), s.secretsManagerProfile(), &output))
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	assert.Equal(t, "Connection check passed; local tunnel and temporary credentials cleaned up.", lines[len(lines)-1])
 }
