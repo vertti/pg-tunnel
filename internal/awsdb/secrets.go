@@ -21,8 +21,9 @@ type SecretsAPI interface {
 
 // Secrets retrieves passwords from an explicitly selected Secrets Manager secret.
 type Secrets struct {
-	API SecretsAPI
-	ID  string
+	API    SecretsAPI
+	ID     string
+	Region string
 }
 
 // Credential reads AWSCURRENT on every call, without persisting the secret JSON.
@@ -32,13 +33,19 @@ func (s Secrets) Credential(ctx context.Context, target session.Target) (session
 		if ctx.Err() != nil {
 			return session.Credential{}, fmt.Errorf("Secrets Manager request cancelled: %w", ctx.Err())
 		}
-		code := "request failed"
-		var apiError smithy.APIError
-		if errors.As(err, &apiError) {
-			code = apiError.ErrorCode()
-		}
 		// Do not expose response bodies or decoder errors, which can contain secret data.
-		return session.Credential{}, fmt.Errorf("Secrets Manager GetSecretValue for %q: %s; check AWS login, region, secretsmanager:GetSecretValue and (for a customer-managed key) kms:Decrypt", s.ID, code)
+		var apiError smithy.APIError
+		if !errors.As(err, &apiError) {
+			return session.Credential{}, fmt.Errorf("Secrets Manager GetSecretValue for %q: request failed; check AWS login, region, secretsmanager:GetSecretValue and (for a customer-managed key) kms:Decrypt", s.ID)
+		}
+		switch code := apiError.ErrorCode(); code {
+		case "AccessDeniedException":
+			return session.Credential{}, fmt.Errorf("Secrets Manager GetSecretValue for %q was denied (AccessDeniedException); the AWS role needs secretsmanager:GetSecretValue on the secret, and kms:Decrypt if it uses a customer-managed key", s.ID)
+		case "ResourceNotFoundException":
+			return session.Credential{}, fmt.Errorf("Secrets Manager secret %q not found in %s; check secret_id, region and AWS profile", s.ID, s.Region)
+		default:
+			return session.Credential{}, fmt.Errorf("Secrets Manager GetSecretValue for %q failed: %s", s.ID, code)
+		}
 	}
 	if output.SecretString == nil {
 		return session.Credential{}, errors.New("secret must contain a JSON SecretString; binary secrets are not supported")

@@ -36,6 +36,7 @@ type EC2API interface {
 type Resolver struct {
 	API     RDSAPI
 	Profile *profile.Profile
+	Region  string
 }
 
 // Resolve returns the real endpoint used for IAM signing and TLS verification.
@@ -53,7 +54,9 @@ func (r *Resolver) Resolve(ctx context.Context) (session.Target, error) {
 func (r *Resolver) resolveInstance(ctx context.Context, target session.Target) (session.Target, error) {
 	output, err := r.API.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{DBInstanceIdentifier: aws.String(r.Profile.DBInstance)})
 	if err != nil {
-		return target, fmt.Errorf("RDS DescribeDBInstances for %q (check region, AWS profile, and rds:DescribeDBInstances permission): %w", r.Profile.DBInstance, err)
+		return target, callFailed(fmt.Sprintf("RDS DescribeDBInstances for %q in %s", r.Profile.DBInstance, r.Region), err,
+			"To skip discovery, set host and port on the connection",
+			"Check the instance name, region and AWS profile")
 	}
 	if len(output.DBInstances) != 1 {
 		return target, fmt.Errorf("expected one RDS instance, found %d", len(output.DBInstances))
@@ -75,7 +78,9 @@ func (r *Resolver) resolveInstance(ctx context.Context, target session.Target) (
 func (r *Resolver) resolveCluster(ctx context.Context, target session.Target) (session.Target, error) {
 	output, err := r.API.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(r.Profile.DBCluster)})
 	if err != nil {
-		return target, fmt.Errorf("RDS DescribeDBClusters for %q (check region, AWS profile, and rds:DescribeDBClusters permission): %w", r.Profile.DBCluster, err)
+		return target, callFailed(fmt.Sprintf("RDS DescribeDBClusters for %q in %s", r.Profile.DBCluster, r.Region), err,
+			"To skip discovery, set host and port on the connection",
+			"Check the cluster name, region and AWS profile")
 	}
 	if len(output.DBClusters) != 1 {
 		return target, fmt.Errorf("expected one Aurora cluster, found %d", len(output.DBClusters))
@@ -118,7 +123,9 @@ func JumpHost(ctx context.Context, api EC2API, p *profile.Profile) (string, erro
 	for pages.HasMorePages() {
 		output, err := pages.NextPage(ctx)
 		if err != nil {
-			return "", fmt.Errorf("EC2 DescribeInstances for Name=%q (check ec2:DescribeInstances permission): %w", p.JumpTag, err)
+			return "", callFailed(fmt.Sprintf("EC2 DescribeInstances for Name=%q", p.JumpTag), err,
+				"To skip this lookup, set target to the jump host's instance ID",
+				"Check the region and AWS profile")
 		}
 		for _, reservation := range output.Reservations {
 			for index := range reservation.Instances {

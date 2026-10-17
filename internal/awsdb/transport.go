@@ -72,7 +72,9 @@ func (s *SSM) Open(ctx context.Context, target session.Target) (_ session.Tunnel
 	defer cancel()
 	output, err := s.API.StartSession(startupCtx, input)
 	if err != nil {
-		return nil, fmt.Errorf("SSM StartSession for %s; check ssm:StartSession permission and the target's SSM connectivity: %w", s.Target, err)
+		return nil, callFailed("SSM StartSession for "+s.Target, err,
+			"",
+			"Check that the jump host is online in SSM (aws ssm describe-instance-information)")
 	}
 	handle := &tunnel{api: s.API, sessionID: aws.ToString(output.SessionId), token: aws.ToString(output.TokenValue), port: port}
 	handle.logs = &logTail{report: s.Report, token: handle.token}

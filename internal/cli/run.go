@@ -166,7 +166,7 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	if err != nil {
 		return err
 	}
-	target, err := (&awsdb.Resolver{API: rds.NewFromConfig(cfg), Profile: p}).Resolve(setupCtx)
+	target, err := (&awsdb.Resolver{API: rds.NewFromConfig(cfg), Profile: p, Region: cfg.Region}).Resolve(setupCtx)
 	if err != nil {
 		return fmt.Errorf("discover database: %w", err)
 	}
@@ -312,7 +312,7 @@ func cleanup(output io.Writer) error {
 
 func databaseAuth(p *profile.Profile, cfg *aws.Config, report func(string)) (session.Auth, error) {
 	if p.Auth == profile.AuthSecretsManager {
-		return awsdb.Secrets{API: secretsmanager.NewFromConfig(*cfg), ID: p.SecretID}, nil
+		return awsdb.Secrets{API: secretsmanager.NewFromConfig(*cfg), ID: p.SecretID, Region: cfg.Region}, nil
 	}
 	expiry, err := environmentExpiry()
 	if err != nil {
