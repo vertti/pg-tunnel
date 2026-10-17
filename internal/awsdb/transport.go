@@ -72,7 +72,7 @@ func (s *SSM) Open(ctx context.Context, target session.Target) (_ session.Tunnel
 	defer cancel()
 	output, err := s.API.StartSession(startupCtx, input)
 	if err != nil {
-		return nil, callFailed("SSM StartSession for "+s.Target, err,
+		return nil, CallFailed("SSM StartSession for "+s.Target, err,
 			"",
 			"Check that the jump host is online in SSM (aws ssm describe-instance-information)")
 	}

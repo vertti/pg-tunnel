@@ -347,15 +347,15 @@ func TestScenarioAWSFailuresAtStartup(t *testing.T) {
 	}{
 		{
 			name: "jump host lookup denied", action: "ec2:DescribeInstances", setup: func(p *profile.Profile) { p.Target, p.JumpTag = "", "bastion" },
-			want: `discover jump host: EC2 DescribeInstances for Name="bastion" was denied: You are not authorized to perform this operation. ` + deniedPrefix + "ec2:DescribeInstances because no identity-based policy allows the ec2:DescribeInstances action. To skip this lookup, set target to the jump host's instance ID",
+			want: `discover jump host in eu-west-1: EC2 DescribeInstances for Name="bastion" was denied: You are not authorized to perform this operation. ` + deniedPrefix + "ec2:DescribeInstances because no identity-based policy allows the ec2:DescribeInstances action. To skip this lookup, set target to the jump host's instance ID",
 		},
 		{
 			name: "instance lookup denied", action: "rds:DescribeDBInstances", setup: func(p *profile.Profile) { p.Host, p.DBInstance = "", "app-db" },
-			want: `discover database: RDS DescribeDBInstances for "app-db" in eu-west-1 was denied: ` + deniedPrefix + "rds:DescribeDBInstances because no identity-based policy allows the rds:DescribeDBInstances action. To skip discovery, set host and port on the connection",
+			want: `discover database: RDS DescribeDBInstances for "app-db" in eu-west-1 was denied: ` + deniedPrefix + "rds:DescribeDBInstances because no identity-based policy allows the rds:DescribeDBInstances action. To skip discovery, use host, port and sslrootcert instead of db_instance",
 		},
 		{
 			name: "cluster lookup denied", action: "rds:DescribeDBClusters", setup: func(p *profile.Profile) { p.Host, p.DBCluster = "", "app-cluster" },
-			want: `discover database: RDS DescribeDBClusters for "app-cluster" in eu-west-1 was denied: ` + deniedPrefix + "rds:DescribeDBClusters because no identity-based policy allows the rds:DescribeDBClusters action. To skip discovery, set host and port on the connection",
+			want: `discover database: RDS DescribeDBClusters for "app-cluster" in eu-west-1 was denied: ` + deniedPrefix + "rds:DescribeDBClusters because no identity-based policy allows the rds:DescribeDBClusters action. To skip discovery, use host, port and sslrootcert instead of db_cluster",
 		},
 		{
 			name: "session denied", action: "ssm:StartSession",

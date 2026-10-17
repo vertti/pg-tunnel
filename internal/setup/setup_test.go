@@ -53,14 +53,22 @@ func fixtureConfig(t *testing.T, denied string) aws.Config {
 		}
 		status := http.StatusOK
 		if service == denied {
-			status = http.StatusForbidden
-			content = `{"__type":"AccessDeniedException","Message":"not authorized"}`
-			if service != "ssm" {
-				content = `<Response><Errors><Error><Code>AccessDenied</Code><Message>not authorized</Message></Error></Errors></Response>`
-			}
+			status, content = http.StatusForbidden, accessDenied(service)
 		}
 		return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(content)), Request: request}, nil
 	})}
+}
+
+// accessDenied answers in the error format of each service's protocol.
+func accessDenied(service string) string {
+	switch service {
+	case "ssm":
+		return `{"__type":"AccessDeniedException","Message":"not authorized"}`
+	case "ec2":
+		return `<Response><Errors><Error><Code>UnauthorizedOperation</Code><Message>not authorized</Message></Error></Errors></Response>`
+	default:
+		return `<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code><Message>not authorized</Message></Error></ErrorResponse>`
+	}
 }
 
 func rdsPage(body string) string {
@@ -131,7 +139,12 @@ func TestWizardDiscoversAcrossPagesAndSavesOnlyAfterConfirmation(t *testing.T) {
 func TestWizardDiscoveryPermissionFailures(t *testing.T) {
 	t.Parallel()
 	ca := testutil.CA(t)
-	for _, service := range []string{"sts", "rds", "ssm", "ec2"} {
+	for service, want := range map[string]string{
+		"sts": "STS GetCallerIdentity was denied: not authorized",
+		"rds": "RDS DescribeDBInstances in eu-central-1 was denied: not authorized. init needs it to list databases; without it, write the connection in pg-tunnel.json by hand using host, port and sslrootcert",
+		"ssm": "Jump-host discovery unavailable: SSM DescribeInstanceInformation was denied: not authorized\n",
+		"ec2": "Jump-host discovery unavailable: EC2 DescribeInstances was denied: not authorized\n",
+	} {
 		t.Run(service, func(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "profiles.json")
@@ -139,12 +152,12 @@ func TestWizardDiscoveryPermissionFailures(t *testing.T) {
 			wizard := setup.Wizard{Verify: successfulVerification, Config: fixtureConfig(t, service), Input: strings.NewReader("1\n1\ni-manual\n1\ndata\nreader\n\nreadonly\nyes\n"), Output: &output, Path: path, RootCert: ca}
 			err := wizard.Run(t.Context())
 			if service == "sts" || service == "rds" {
-				require.Error(t, err)
+				require.EqualError(t, err, want)
 				assert.NoFileExists(t, path)
 				return
 			}
 			require.NoError(t, err)
-			assert.Contains(t, output.String(), "Jump-host discovery unavailable")
+			assert.Contains(t, output.String(), want)
 			saved, err := profile.Load(path, "readonly")
 			require.NoError(t, err)
 			assert.Equal(t, "i-manual", saved.Target)

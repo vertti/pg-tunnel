@@ -134,7 +134,7 @@ func TestClusterRejectsUnusableDiscovery(t *testing.T) {
 	}{
 		{name: "missing", count: 0, want: "found 0"},
 		{name: "ambiguous", count: 2, want: "found 2"},
-		{name: "denied", failure: &smithy.GenericAPIError{Code: "AccessDenied", Message: "not authorized"}, want: "was denied: not authorized. To skip discovery, set host and port"},
+		{name: "denied", failure: &smithy.GenericAPIError{Code: "AccessDenied", Message: "not authorized"}, want: "was denied: not authorized. To skip discovery, use host, port and sslrootcert instead of db_cluster"},
 		{name: "wrong engine", count: 1, edit: func(c *rdstypes.DBCluster) { c.Engine = aws.String("aurora-mysql") }, want: "only Aurora PostgreSQL"},
 		{name: "IAM disabled", count: 1, edit: func(c *rdstypes.DBCluster) { c.IAMDatabaseAuthenticationEnabled = nil }, want: "IAM database authentication is disabled"},
 		{name: "password does not require IAM", count: 1, auth: profile.AuthSecretsManager, edit: func(c *rdstypes.DBCluster) { c.IAMDatabaseAuthenticationEnabled = nil }},

@@ -15,9 +15,9 @@ type callError struct {
 func (e *callError) Error() string { return e.text }
 func (e *callError) Unwrap() error { return e.err }
 
-// callFailed describes a failed AWS call by AWS's own message, with the hint
+// CallFailed describes a failed AWS call by AWS's own message, with the hint
 // that fits: denied for authorization failures, other for other AWS errors.
-func callFailed(call string, err error, denied, other string) error {
+func CallFailed(call string, err error, denied, other string) error {
 	var apiError smithy.APIError
 	if !errors.As(err, &apiError) {
 		return &callError{text: call + " failed: " + err.Error(), err: err}
