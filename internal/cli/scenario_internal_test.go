@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/vertti/pg-tunnel/internal/awsdb"
 	"github.com/vertti/pg-tunnel/internal/profile"
 	"github.com/vertti/pg-tunnel/internal/session"
 	"github.com/vertti/pg-tunnel/internal/testutil"
@@ -495,4 +496,26 @@ func TestScenarioAWSUnresponsiveMidSession(t *testing.T) {
 	require.NoError(t, s.psql("SELECT 1"))
 	s.aws.hang("secretsmanager:GetSecretValue", false)
 	s.waitForMessage("Credential refresh recovered.")
+}
+
+func TestScenarioSSMResumeUsesTheConfiguredEndpoint(t *testing.T) {
+	for name, env := range map[string]string{"AWS_ENDPOINT_URL": "", "AWS_ENDPOINT_URL_SSM": "https://ssm.vpce.example"} {
+		t.Run(name, func(t *testing.T) {
+			s := newScenario(t)
+			want := os.Getenv("AWS_ENDPOINT_URL")
+			if env != "" {
+				t.Setenv(name, env)
+				want = env
+			}
+			var endpoint string
+			configureRunner = func(runner *session.Runner) {
+				ssm, ok := runner.Transport.(*awsdb.SSM)
+				require.True(t, ok)
+				endpoint = ssm.Endpoint
+				runner.Transport = directTransport{port: s.postgres.Port}
+			}
+			s.start(s.secretsManagerProfile())
+			assert.Equal(t, want, endpoint)
+		})
+	}
 }

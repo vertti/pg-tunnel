@@ -171,9 +171,10 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	if err != nil {
 		return fmt.Errorf("discover database: %w", err)
 	}
+	ssmClient := ssm.NewFromConfig(cfg)
 	runner := session.Runner{
 		Target:    target,
-		Transport: &awsdb.SSM{API: ssm.NewFromConfig(cfg), Region: cfg.Region, Profile: p.AWSProfile, Target: jump, LocalPort: p.LocalPort, Report: report},
+		Transport: &awsdb.SSM{API: ssmClient, Region: cfg.Region, Profile: p.AWSProfile, Target: jump, LocalPort: p.LocalPort, Report: report, Endpoint: aws.ToString(ssmClient.Options().BaseEndpoint)},
 		Auth:      authentication,
 		Clients:   files, Verify: libpq.Verify, Env: os.Environ(), Report: report,
 		Command: command,
