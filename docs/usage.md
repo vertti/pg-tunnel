@@ -190,9 +190,9 @@ pg-tunnel: Postico, notebooks and scripts in any terminal can connect to host 12
 
 Leave the password empty: while the session runs, pg-tunnel keeps the current
 password or IAM token in a marked block at the top of `~/.pgpass` and removes it
-when the session ends. Your other lines stay unchanged. Use `127.0.0.1` rather
-than `localhost`, which clients may try over IPv6 first, where the tunnel does
-not listen. TLS encrypts these connections but cannot verify the database
+when the session ends. Your other lines stay unchanged. Use `127.0.0.1`, not
+`localhost`: `localhost` may resolve to IPv6, where the tunnel does not listen,
+so pg-tunnel stores the password only for `127.0.0.1`. TLS encrypts these connections but cannot verify the database
 hostname; for full verification, start the client with `run`. If another session
 holds the fixed port, `connect` uses a free port and prints it. Ctrl-C closes
 `connect` and exits 0. GUI support depends on
