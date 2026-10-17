@@ -47,6 +47,9 @@ func initProfile(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	cfgCtx, cancel := context.WithTimeout(ctx, setupTimeout)
 	defer cancel()
 	cfg, err := awsConfig(cfgCtx, &p)
+	if errors.Is(err, errNoAWSCredentials) {
+		return fmt.Errorf("%w; rerun with --aws-profile <profile> (aws configure list-profiles)", err)
+	}
 	if err != nil {
 		return err
 	}
