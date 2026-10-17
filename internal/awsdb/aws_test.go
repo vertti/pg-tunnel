@@ -66,7 +66,12 @@ func TestJumpHostRejectsAmbiguityAcrossPages(t *testing.T) {
 		return output, nil
 	})
 	_, err := awsdb.JumpHost(t.Context(), api, &profile.Profile{JumpTag: "jump"})
-	require.ErrorContains(t, err, "found 2")
+	require.EqualError(t, err, `2 running instances have Name="jump" (i-example, i-example); set target to one of them`)
+	none := ec2Func(func(context.Context, *ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error) {
+		return &ec2.DescribeInstancesOutput{}, nil
+	})
+	_, err = awsdb.JumpHost(t.Context(), none, &profile.Profile{JumpTag: "jump"})
+	require.EqualError(t, err, `no running instance has Name="jump"; check jump_tag and the region, or set target to the jump host's instance ID`)
 }
 
 func TestIAMSignsRemoteEndpointAndReportsExpiry(t *testing.T) {

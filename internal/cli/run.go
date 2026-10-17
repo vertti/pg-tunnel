@@ -156,7 +156,7 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 	}
 	jump, err := awsdb.JumpHost(setupCtx, ec2.NewFromConfig(cfg), p)
 	if err != nil {
-		return fmt.Errorf("discover jump host: %w", err)
+		return fmt.Errorf("discover jump host in %s: %w", cfg.Region, err)
 	}
 	files, err := sessionFiles()
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -54,8 +55,8 @@ func (r *Resolver) Resolve(ctx context.Context) (session.Target, error) {
 func (r *Resolver) resolveInstance(ctx context.Context, target session.Target) (session.Target, error) {
 	output, err := r.API.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{DBInstanceIdentifier: aws.String(r.Profile.DBInstance)})
 	if err != nil {
-		return target, callFailed(fmt.Sprintf("RDS DescribeDBInstances for %q in %s", r.Profile.DBInstance, r.Region), err,
-			"To skip discovery, set host and port on the connection",
+		return target, CallFailed(fmt.Sprintf("RDS DescribeDBInstances for %q in %s", r.Profile.DBInstance, r.Region), err,
+			"To skip discovery, use host, port and sslrootcert instead of db_instance",
 			"Check the instance name, region and AWS profile")
 	}
 	if len(output.DBInstances) != 1 {
@@ -78,8 +79,8 @@ func (r *Resolver) resolveInstance(ctx context.Context, target session.Target) (
 func (r *Resolver) resolveCluster(ctx context.Context, target session.Target) (session.Target, error) {
 	output, err := r.API.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(r.Profile.DBCluster)})
 	if err != nil {
-		return target, callFailed(fmt.Sprintf("RDS DescribeDBClusters for %q in %s", r.Profile.DBCluster, r.Region), err,
-			"To skip discovery, set host and port on the connection",
+		return target, CallFailed(fmt.Sprintf("RDS DescribeDBClusters for %q in %s", r.Profile.DBCluster, r.Region), err,
+			"To skip discovery, use host, port and sslrootcert instead of db_cluster",
 			"Check the cluster name, region and AWS profile")
 	}
 	if len(output.DBClusters) != 1 {
@@ -123,7 +124,7 @@ func JumpHost(ctx context.Context, api EC2API, p *profile.Profile) (string, erro
 	for pages.HasMorePages() {
 		output, err := pages.NextPage(ctx)
 		if err != nil {
-			return "", callFailed(fmt.Sprintf("EC2 DescribeInstances for Name=%q", p.JumpTag), err,
+			return "", CallFailed(fmt.Sprintf("EC2 DescribeInstances for Name=%q", p.JumpTag), err,
 				"To skip this lookup, set target to the jump host's instance ID",
 				"Check the region and AWS profile")
 		}
@@ -133,8 +134,13 @@ func JumpHost(ctx context.Context, api EC2API, p *profile.Profile) (string, erro
 			}
 		}
 	}
-	if len(ids) != 1 || ids[0] == "" {
-		return "", fmt.Errorf("expected one running jump host with Name=%q, found %d; configure an explicit target if ambiguous", p.JumpTag, len(ids))
+	switch {
+	case len(ids) == 0:
+		return "", fmt.Errorf("no running instance has Name=%q; check jump_tag and the region, or set target to the jump host's instance ID", p.JumpTag)
+	case len(ids) > 1:
+		return "", fmt.Errorf("%d running instances have Name=%q (%s); set target to one of them", len(ids), p.JumpTag, strings.Join(ids, ", "))
+	case ids[0] == "":
+		return "", errors.New("EC2 returned a jump host without an instance ID; set target to the jump host's instance ID")
 	}
 	return ids[0], nil
 }

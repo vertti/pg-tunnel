@@ -84,6 +84,9 @@ linters:
           arguments: [checkPrivateReceivers, disableStutteringCheck]
     testifylint:
       enable-all: true
+    wrapcheck:
+      extra-ignore-sigs:
+        - awsdb.CallFailed(
   exclusions:
     presets: []
     rules:
