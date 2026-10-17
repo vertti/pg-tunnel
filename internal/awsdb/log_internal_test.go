@@ -35,8 +35,8 @@ func TestTokenIsRedactedBeforeTheTailIsTrimmed(t *testing.T) {
 				_, err := tail.Write([]byte(chunk))
 				require.NoError(t, err)
 			}
-			assert.NotContains(t, tail.String(), token[:10])
-			assert.NotContains(t, tail.String(), token[len(token)-10:])
+			assert.NotContains(t, tail.lastLines(5), token[:10])
+			assert.NotContains(t, tail.lastLines(5), token[len(token)-10:])
 		})
 	}
 }

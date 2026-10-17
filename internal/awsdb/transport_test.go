@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -161,6 +162,66 @@ func TestEmbeddedShutdownSendsTerminationFlag(t *testing.T) {
 	assert.Empty(t, entries, "AWS must remove its multiplexing socket")
 }
 
+func TestEmbeddedConnectionLossReportsWhyTheTunnelStopped(t *testing.T) {
+	directory, err := os.MkdirTemp("/tmp", "ssm-") //nolint:usetesting // t.TempDir includes the test name and exceeds the macOS socket path limit.
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.RemoveAll(directory)) })
+	t.Setenv("TMPDIR", directory)
+	t.Setenv("AWS_ACCESS_KEY_ID", "test")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	port := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if websocket.IsWebSocketUpgrade(r) {
+			assert.NoError(t, droppedAfterHandshake(w, r, <-port))
+			return
+		}
+		assert.Equal(t, "AmazonSSM.ResumeSession", r.Header.Get("X-Amz-Target"))
+		w.Header().Set("Content-Type", "application/x-amz-json-1.1")
+		w.WriteHeader(http.StatusBadRequest)
+		_, writeErr := w.Write([]byte(`{"__type":"AccessDeniedException","Message":"not authorized"}`))
+		assert.NoError(t, writeErr)
+	}))
+	defer server.Close()
+	var mu sync.Mutex
+	var reports []string
+	// A presigned stream URL would make the child reconnect without calling ResumeSession.
+	api := &localSSM{url: "ws" + strings.TrimPrefix(server.URL, "http") + "/stream", port: port}
+	transport := awsdb.SSM{API: api, Region: "eu-central-1", Target: "i-example", Executable: testExecutable(), Endpoint: server.URL, Report: func(message string) {
+		mu.Lock()
+		defer mu.Unlock()
+		reports = append(reports, message)
+	}}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	tunnel, err := transport.Open(ctx, session.Target{Host: "db.example", Port: 5432})
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, tunnel.Close(context.WithoutCancel(t.Context()))) })
+	select {
+	case <-tunnel.Done():
+	case <-ctx.Done():
+		t.Fatalf("the tunnel did not stop after SSM rejected recovery; reports %q", reports)
+	}
+	require.EqualError(t, tunnel.Err(), "SSM resume rejected: AWS denied ssm:ResumeSession. Check AWS login and session access, then restart pg-tunnel")
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{ssmplugin.RecoveryStarted}, reports)
+}
+
+// droppedAfterHandshake opens the port-forwarding session, then drops the connection.
+func droppedAfterHandshake(w http.ResponseWriter, r *http.Request, port string) error {
+	var upgrader websocket.Upgrader
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return fmt.Errorf("upgrade forwarding fixture: %w", err)
+	}
+	if err := sendHandshake(conn, port); err != nil {
+		return err
+	}
+	time.Sleep(time.Second)
+	return conn.UnderlyingConn().Close() //nolint:wrapcheck // Fixture teardown.
+}
+
 // Use upstream serialization to exercise the real multiplexed port handler.
 func forwardingHandshake(w http.ResponseWriter, r *http.Request, port string) error {
 	var upgrader websocket.Upgrader
@@ -169,6 +230,13 @@ func forwardingHandshake(w http.ResponseWriter, r *http.Request, port string) er
 		return fmt.Errorf("upgrade forwarding fixture: %w", err)
 	}
 	defer conn.Close() //nolint:errcheck // Fixture teardown after child shutdown.
+	if err := sendHandshake(conn, port); err != nil {
+		return err
+	}
+	return receiveTermination(conn, ssmlog.Logger(false, "pg-tunnel-test"))
+}
+
+func sendHandshake(conn *websocket.Conn, port string) error {
 	if err := conn.SetReadDeadline(time.Now().Add(8 * time.Second)); err != nil {
 		return fmt.Errorf("set forwarding deadline: %w", err)
 	}
@@ -191,7 +259,7 @@ func forwardingHandshake(w http.ResponseWriter, r *http.Request, port string) er
 			return fmt.Errorf("send forwarding handshake: %w", err)
 		}
 	}
-	return receiveTermination(conn, logger)
+	return nil
 }
 
 func receiveTermination(conn *websocket.Conn, logger ssmlog.T) error {

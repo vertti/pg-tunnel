@@ -136,7 +136,7 @@ func (r *Runner) runCommand(ctx context.Context, target Target, tunnel Tunnel, c
 	case err := <-commandDone:
 		return err
 	case <-tunnel.Done():
-		err := fmt.Errorf("tunnel stopped; child command is being stopped: %w", tunnel.Err())
+		err := fmt.Errorf("tunnel stopped: %w", tunnel.Err())
 		cancel(err)
 		return errors.Join(err, <-commandDone)
 	}
