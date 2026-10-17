@@ -78,7 +78,7 @@ type Runner struct {
 	Command   Command
 	Report    func(string)
 	Env       []string
-	// Zero durations use the defaults: polls every 5 minutes, a 1-minute startup and 30-second refreshes.
+	// Zero durations use the defaults.
 	PasswordPoll   time.Duration
 	StartupTimeout time.Duration
 	RefreshTimeout time.Duration
@@ -86,7 +86,7 @@ type Runner struct {
 
 // Run starts a database session, runs its command, and closes every resource.
 func (r *Runner) Run(ctx context.Context) (result error) {
-	startupCtx, startupCancel := context.WithTimeout(ctx, orDefault(r.StartupTimeout, time.Minute))
+	startupCtx, startupCancel := context.WithTimeout(ctx, orDefault(r.StartupTimeout, defaultStartupTimeout))
 	defer startupCancel()
 	target := r.Target
 	r.report(fmt.Sprintf("Database: %s:%d (%s, user %s)", target.Host, target.Port, target.Database, target.User))
@@ -144,9 +144,11 @@ func (r *Runner) runCommand(ctx context.Context, target Target, tunnel Tunnel, c
 }
 
 const (
-	defaultPasswordPoll = 5 * time.Minute
-	renewalMargin       = 3 * time.Minute
-	minimumRenewal      = 30 * time.Second
+	defaultPasswordPoll   = 5 * time.Minute
+	defaultStartupTimeout = time.Minute
+	defaultRefreshTimeout = 30 * time.Second
+	renewalMargin         = 3 * time.Minute
+	minimumRenewal        = 30 * time.Second
 	// Monotonic timers pause while macOS sleeps, so waits are re-checked against the wall clock.
 	wallClockCheck = time.Minute
 )
@@ -206,7 +208,7 @@ func sleepUntil(ctx context.Context, due time.Time) bool {
 }
 
 func (r *Runner) renew(ctx context.Context, target Target, port int, client Client, current Credential) (Credential, error) {
-	refreshCtx, cancel := context.WithTimeout(ctx, orDefault(r.RefreshTimeout, 30*time.Second))
+	refreshCtx, cancel := context.WithTimeout(ctx, orDefault(r.RefreshTimeout, defaultRefreshTimeout))
 	defer cancel()
 	credential, err := r.Auth.Credential(refreshCtx, target)
 	if err != nil {

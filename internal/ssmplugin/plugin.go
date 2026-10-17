@@ -67,17 +67,17 @@ func stopWhenSupervisorExits(stdin io.Reader) {
 }
 
 // Keep token handling private while using AWS's session, handshake and forwarding code.
-// args are region, AWS profile, target, and SSM endpoint.
 func newSession(args []string, response []byte) (*session.Session, error) {
+	region, awsProfile, target, endpoint := args[0], args[1], args[2], args[3]
 	var start ssm.StartSessionOutput
 	if json.Unmarshal(response, &start) != nil {
 		return nil, errors.New("invalid internal SSM response")
 	}
-	s := &session.Session{SessionId: aws.ToString(start.SessionId), StreamUrl: aws.ToString(start.StreamUrl), TokenValue: aws.ToString(start.TokenValue), TargetId: args[2], Region: args[0], Endpoint: args[3]}
+	s := &session.Session{SessionId: aws.ToString(start.SessionId), StreamUrl: aws.ToString(start.StreamUrl), TokenValue: aws.ToString(start.TokenValue), TargetId: target, Region: region, Endpoint: endpoint}
 	if s.SessionId == "" || s.StreamUrl == "" || s.TokenValue == "" || s.TargetId == "" {
 		return nil, errors.New("incomplete internal SSM session")
 	}
-	sdkutil.SetRegionAndProfile(args[0], args[1])
+	sdkutil.SetRegionAndProfile(region, awsProfile)
 	uuid.SwitchFormat(uuid.CleanHyphen)
 	s.ClientId = uuid.NewV4().String()
 	return s, nil

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,7 +16,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 
-	"github.com/vertti/pg-tunnel/internal/awsdb"
 	"github.com/vertti/pg-tunnel/internal/libpq"
 	"github.com/vertti/pg-tunnel/internal/profile"
 	"github.com/vertti/pg-tunnel/internal/session"
@@ -40,7 +38,7 @@ type prompt struct {
 }
 
 // Run previews a profile, then verifies and saves it after explicit confirmation.
-// Input must honor cancellation; the CLI supplies a cancellable terminal reader.
+// Input must honor cancellation.
 func (w *Wizard) Run(ctx context.Context) error {
 	ui := prompt{input: bufio.NewScanner(w.Input), output: w.Output}
 	id, err := account(ctx, &w.Config)
@@ -67,12 +65,6 @@ func (w *Wizard) Run(ctx context.Context) error {
 	}
 	if p.LocalPort, err = freeLocalPort(ctx, w.Path); err != nil {
 		return err
-	}
-	if p.RootCert == "" {
-		logger := log.New(w.Output, "", 0)
-		if _, err = awsdb.RDSCA(ctx, w.Config.Region, func(message string) { logger.Print(message) }); err != nil {
-			return fmt.Errorf("prepare automatic RDS certificates: %w", err)
-		}
 	}
 	return w.save(ctx, &ui, &p)
 }
@@ -266,7 +258,7 @@ func freeLocalPort(ctx context.Context, path string) (int, error) {
 		if used[port] {
 			continue
 		}
-		listener, listenErr := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		listener, listenErr := (&net.ListenConfig{}).Listen(ctx, "tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 		if listenErr == nil {
 			if err = listener.Close(); err != nil {
 				return 0, fmt.Errorf("release local port check: %w", err)
