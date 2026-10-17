@@ -391,7 +391,7 @@ func TestScenarioAWSFailuresAtStartup(t *testing.T) {
 		},
 		{
 			name: "secret denied", action: "secretsmanager:GetSecretValue",
-			want: `database session: obtain database credential: Secrets Manager GetSecretValue for "db-secret" was denied (AccessDeniedException); the AWS role needs secretsmanager:GetSecretValue on the secret, and kms:Decrypt if it uses a customer-managed key`,
+			want: `database session: obtain database credential: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 was denied: ` + deniedPrefix + "secretsmanager:GetSecretValue because no identity-based policy allows the secretsmanager:GetSecretValue action. The AWS role needs secretsmanager:GetSecretValue on the secret, and kms:Decrypt if it uses a customer-managed key",
 		},
 		{
 			name: "instance not found", action: "rds:DescribeDBInstances", code: "DBInstanceNotFound", message: "DBInstance app-db not found.", setup: func(p *profile.Profile) { p.Host, p.DBInstance = "", "app-db" },
@@ -403,7 +403,7 @@ func TestScenarioAWSFailuresAtStartup(t *testing.T) {
 		},
 		{
 			name: "secret not found", action: "secretsmanager:GetSecretValue", code: "ResourceNotFoundException", message: "Secrets Manager can't find the specified secret.",
-			want: `database session: obtain database credential: Secrets Manager secret "db-secret" not found in eu-west-1; check secret_id, region and AWS profile`,
+			want: `database session: obtain database credential: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 failed: Secrets Manager can't find the specified secret. Check secret_id, region and AWS profile`,
 		},
 		{
 			name: "jump host offline", action: "ssm:StartSession", code: "TargetNotConnected", message: "i-scenario is not connected.",
@@ -444,7 +444,7 @@ func TestScenarioSecretAccessLostMidSession(t *testing.T) {
 	s := newScenario(t)
 	s.start(s.secretsManagerProfile())
 	s.aws.deny("secretsmanager:GetSecretValue")
-	s.waitForMessage(`Credential refresh failed: Secrets Manager GetSecretValue for "db-secret" was denied (AccessDeniedException); the AWS role needs secretsmanager:GetSecretValue on the secret, and kms:Decrypt if it uses a customer-managed key. New connections keep using the current password until refresh succeeds.`)
+	s.waitForMessage(`Credential refresh failed: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 was denied: ` + deniedPrefix + "secretsmanager:GetSecretValue because no identity-based policy allows the secretsmanager:GetSecretValue action. The AWS role needs secretsmanager:GetSecretValue on the secret, and kms:Decrypt if it uses a customer-managed key. New connections keep using the current password until refresh succeeds.")
 	require.NoError(t, s.psql("SELECT 1"))
 	s.aws.fail("secretsmanager:GetSecretValue", "", "")
 	s.waitForMessage("Credential refresh recovered.")
@@ -468,7 +468,7 @@ func TestScenarioAWSUnresponsiveAtStartup(t *testing.T) {
 		{"ec2:DescribeInstances", func(_ *scenario, p *profile.Profile) { p.Target, p.JumpTag = "", "bastion" }, `discover jump host in eu-west-1: EC2 DescribeInstances for Name="bastion" timed out`},
 		{"rds:DescribeDBInstances", func(_ *scenario, p *profile.Profile) { p.Host, p.DBInstance = "", "app-db" }, `discover database: RDS DescribeDBInstances for "app-db" in eu-west-1 timed out`},
 		{"ssm:StartSession", func(s *scenario, _ *profile.Profile) { s.ssm = true }, "database session: open tunnel: SSM StartSession for i-scenario timed out"},
-		{"secretsmanager:GetSecretValue", func(*scenario, *profile.Profile) {}, `database session: obtain database credential: Secrets Manager GetSecretValue for "db-secret" timed out`},
+		{"secretsmanager:GetSecretValue", func(*scenario, *profile.Profile) {}, `database session: obtain database credential: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 timed out`},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			s := newScenario(t)
@@ -492,7 +492,7 @@ func TestScenarioAWSUnresponsiveMidSession(t *testing.T) {
 	s := newScenario(t)
 	s.start(s.secretsManagerProfile())
 	s.aws.hang("secretsmanager:GetSecretValue", true)
-	s.waitForMessage(`Credential refresh failed: Secrets Manager GetSecretValue for "db-secret" timed out` + networkHint + ". New connections keep using the current password until refresh succeeds.")
+	s.waitForMessage(`Credential refresh failed: Secrets Manager GetSecretValue for "db-secret" in eu-west-1 timed out` + networkHint + ". New connections keep using the current password until refresh succeeds.")
 	require.NoError(t, s.psql("SELECT 1"))
 	s.aws.hang("secretsmanager:GetSecretValue", false)
 	s.waitForMessage("Credential refresh recovered.")

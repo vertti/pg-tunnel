@@ -30,22 +30,7 @@ type Secrets struct {
 func (s Secrets) Credential(ctx context.Context, target session.Target) (session.Credential, error) {
 	output, err := s.API.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{SecretId: aws.String(s.ID), VersionStage: aws.String("AWSCURRENT")})
 	if err != nil {
-		if problem, ok := transportProblem(err); ok {
-			return session.Credential{}, &callError{text: fmt.Sprintf("Secrets Manager GetSecretValue for %q %s", s.ID, problem), err: err}
-		}
-		// Do not expose response bodies or decoder errors, which can contain secret data.
-		var apiError smithy.APIError
-		if !errors.As(err, &apiError) {
-			return session.Credential{}, fmt.Errorf("Secrets Manager GetSecretValue for %q: request failed; check AWS login, region, secretsmanager:GetSecretValue and (for a customer-managed key) kms:Decrypt", s.ID)
-		}
-		switch code := apiError.ErrorCode(); code {
-		case "AccessDeniedException":
-			return session.Credential{}, fmt.Errorf("Secrets Manager GetSecretValue for %q was denied (AccessDeniedException); the AWS role needs secretsmanager:GetSecretValue on the secret, and kms:Decrypt if it uses a customer-managed key", s.ID)
-		case "ResourceNotFoundException":
-			return session.Credential{}, fmt.Errorf("Secrets Manager secret %q not found in %s; check secret_id, region and AWS profile", s.ID, s.Region)
-		default:
-			return session.Credential{}, fmt.Errorf("Secrets Manager GetSecretValue for %q failed: %s", s.ID, code)
-		}
+		return session.Credential{}, s.callFailed(err)
 	}
 	if output.SecretString == nil {
 		return session.Credential{}, errors.New("secret must contain a JSON SecretString; binary secrets are not supported")
@@ -56,6 +41,22 @@ func (s Secrets) Credential(ctx context.Context, target session.Target) (session
 	}
 	credential.CreatedAt = aws.ToTime(output.CreatedDate)
 	return credential, nil
+}
+
+func (s Secrets) callFailed(err error) error {
+	var apiError smithy.APIError
+	_, transport := transportProblem(err)
+	if !transport && !errors.As(err, &apiError) {
+		// Decoder errors can contain secret data.
+		return fmt.Errorf("Secrets Manager GetSecretValue for %q: request failed", s.ID)
+	}
+	notFound := ""
+	if apiError != nil && apiError.ErrorCode() == "ResourceNotFoundException" {
+		notFound = "Check secret_id, region and AWS profile"
+	}
+	return CallFailed(fmt.Sprintf("Secrets Manager GetSecretValue for %q in %s", s.ID, s.Region), err,
+		"The AWS role needs secretsmanager:GetSecretValue on the secret, and kms:Decrypt if it uses a customer-managed key",
+		notFound)
 }
 
 type databaseSecret struct {

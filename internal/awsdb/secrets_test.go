@@ -83,7 +83,7 @@ func TestSecretsErrorsDoNotExposeResponseBodies(t *testing.T) {
 		status              int
 	}{
 		{"binary", `{"SecretBinary":"cHJpdmF0ZS1tYXJrZXI="}`, "binary secrets", http.StatusOK},
-		{"denied", `{"__type":"AccessDeniedException","Message":"private-marker"}`, "AccessDeniedException", http.StatusBadRequest},
+		{"denied", `{"__type":"AccessDeniedException","Message":"Access to KMS is not allowed"}`, `Secrets Manager GetSecretValue for "chosen-secret" in  was denied: Access to KMS is not allowed. The AWS role needs`, http.StatusBadRequest},
 		{"malformed response", `{"SecretString":{"password":"private-marker"}}`, "request failed", http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
