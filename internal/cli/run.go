@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds"
+	"github.com/aws/aws-sdk-go-v2/credentials/ssocreds"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -237,14 +238,23 @@ func awsConfig(ctx context.Context, p *profile.Profile) (aws.Config, error) {
 	return cfg, nil
 }
 
-func credentialsError(cfg *aws.Config, err error) error {
+func sharedConfig(cfg *aws.Config) config.SharedConfig {
 	var shared config.SharedConfig
 	for _, source := range cfg.ConfigSources {
 		if value, ok := source.(config.SharedConfig); ok {
 			shared = value
 		}
 	}
-	if shared.SSOSessionName != "" || shared.SSOStartURL != "" {
+	return shared
+}
+
+func usesSSO(shared *config.SharedConfig) bool {
+	return shared.SSOSessionName != "" || shared.SSOStartURL != ""
+}
+
+func credentialsError(cfg *aws.Config, err error) error {
+	shared := sharedConfig(cfg)
+	if usesSSO(&shared) {
 		return fmt.Errorf("no usable AWS credentials; AWS profile %s uses IAM Identity Center; log in with aws sso login --profile %s: %w", shared.Profile, shared.Profile, err)
 	}
 	// The SDK falls back to the EC2 instance role only when nothing else configures credentials.
@@ -312,11 +322,34 @@ func cleanup(output io.Writer) error {
 
 func databaseAuth(p *profile.Profile, cfg *aws.Config, report func(string)) (session.Auth, error) {
 	if p.Auth == profile.AuthSecretsManager {
-		return awsdb.Secrets{API: secretsmanager.NewFromConfig(*cfg), ID: p.SecretID, Region: cfg.Region}, nil
+		return loginCheckedAuth{Auth: awsdb.Secrets{API: secretsmanager.NewFromConfig(*cfg), ID: p.SecretID, Region: cfg.Region}, cfg: cfg}, nil
 	}
 	expiry, err := environmentExpiry()
 	if err != nil {
 		return nil, err
 	}
-	return &awsdb.IAM{Provider: cfg.Credentials, Region: cfg.Region, EnvironmentExpiry: expiry, Report: report}, nil
+	return loginCheckedAuth{Auth: &awsdb.IAM{Provider: cfg.Credentials, Region: cfg.Region, EnvironmentExpiry: expiry, Report: report}, cfg: cfg}, nil
+}
+
+// loginCheckedAuth reports an expired AWS login as such, not as a failure of the AWS call it breaks.
+type loginCheckedAuth struct {
+	session.Auth
+	cfg *aws.Config
+}
+
+// Credential checks the AWS login before asking the wrapped Auth for a credential.
+func (a loginCheckedAuth) Credential(ctx context.Context, target session.Target) (session.Credential, error) {
+	if _, err := a.cfg.Credentials.Retrieve(ctx); err != nil {
+		shared := sharedConfig(a.cfg)
+		var expired *ssocreds.InvalidTokenError
+		switch {
+		case usesSSO(&shared) && errors.As(err, &expired):
+			return session.Credential{}, fmt.Errorf("AWS SSO login for profile %s has expired; run aws sso login --profile %s", shared.Profile, shared.Profile)
+		case usesSSO(&shared):
+			return session.Credential{}, fmt.Errorf("AWS SSO credentials for profile %s are unavailable; if aws sso login --profile %s does not help: %w", shared.Profile, shared.Profile, err)
+		default:
+			return session.Credential{}, fmt.Errorf("AWS credentials are unavailable: %w", err)
+		}
+	}
+	return a.Auth.Credential(ctx, target) //nolint:wrapcheck // The wrapped Auth names its own AWS call.
 }
