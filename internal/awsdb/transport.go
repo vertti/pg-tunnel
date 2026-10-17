@@ -74,7 +74,7 @@ func (s *SSM) Open(ctx context.Context, target session.Target) (_ session.Tunnel
 	output, err := s.API.StartSession(startupCtx, input)
 	if err != nil {
 		return nil, CallFailed("SSM StartSession for "+s.Target, err,
-			"",
+			"The AWS role needs ssm:StartSession on the jump host and on the AWS-StartPortForwardingSessionToRemoteHost document",
 			"Check that the jump host is online in SSM (aws ssm describe-instance-information)")
 	}
 	handle := &tunnel{api: s.API, sessionID: aws.ToString(output.SessionId), token: aws.ToString(output.TokenValue), port: port}
@@ -198,7 +198,11 @@ func (t *tunnel) Err() error {
 		err = errors.New("unexpected successful exit")
 	}
 	// The child's exit status is not the user's command status, so it is not wrapped.
-	return fmt.Errorf("embedded SSM child exited: %s: %s", t.logs.lastLines(5), err.Error())
+	message := "SSM port forwarding exited: " + err.Error()
+	if lines := t.logs.lastLines(5); lines != "" {
+		message += "; last log lines: " + lines
+	}
+	return errors.New(message)
 }
 
 // Close terminates both the local plugin and remote session.
@@ -272,7 +276,7 @@ func (t *tunnel) waitReady(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("waiting for local tunnel listener; check the SSM agent, embedded child, and remote connectivity: %w", ctx.Err())
+			return fmt.Errorf("local tunnel did not open (%w); check that the jump host is online in SSM (aws ssm describe-instance-information) and can reach the database", ctx.Err())
 		case <-t.Done():
 			return t.Err()
 		case <-ticker.C:

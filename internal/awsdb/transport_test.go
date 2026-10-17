@@ -202,7 +202,7 @@ func TestEmbeddedConnectionLossReportsWhyTheTunnelStopped(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatalf("the tunnel did not stop after SSM rejected recovery; reports %q", reports)
 	}
-	require.EqualError(t, tunnel.Err(), "SSM resume rejected: AWS denied ssm:ResumeSession. Check AWS login and session access, then restart pg-tunnel")
+	require.EqualError(t, tunnel.Err(), "SSM resume rejected: AWS denied ssm:ResumeSession. Check AWS login and session access, then rerun your pg-tunnel command")
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Equal(t, []string{ssmplugin.RecoveryStarted}, reports)

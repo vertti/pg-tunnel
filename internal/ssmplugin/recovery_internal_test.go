@@ -57,7 +57,7 @@ func TestResumeDeadlineIncludesBlockedAWSCall(t *testing.T) {
 		defer close(release)
 		start := time.Now()
 		err := resumeWithin(ctx, func() error { <-release; return nil })
-		require.ErrorContains(t, err, "SSM recovery exceeded 1m")
+		require.ErrorContains(t, err, "SSM recovery exceeded 1 minute")
 		assert.Equal(t, time.Minute, time.Since(start))
 	})
 }
@@ -69,7 +69,7 @@ func TestResumeDeadlineIncludesRepeatedFailures(t *testing.T) {
 		defer cancel()
 		start := time.Now()
 		err := resumeWithin(ctx, func() error { return errors.New("secret-looking upstream failure") })
-		require.ErrorContains(t, err, "SSM recovery exceeded 1m")
+		require.ErrorContains(t, err, "SSM recovery exceeded 1 minute")
 		assert.NotContains(t, err.Error(), "secret-looking")
 		assert.Equal(t, time.Minute, time.Since(start))
 	})
@@ -173,7 +173,7 @@ func TestAWSResumeRejectsTerminalErrorsWithoutStartingAnother(t *testing.T) {
 		{name: "known expired environment", source: config.CredentialsSourceName, expiry: time.Now().Add(-time.Minute).Format(time.RFC3339), reason: "AWS credentials expired", requests: 0},
 		{name: "valid environment expiry", source: config.CredentialsSourceName, expiry: time.Now().Add(time.Hour).Format(time.RFC3339), code: "DoesNotExistException", reason: "the SSM session no longer exists", status: 400, requests: 1},
 		{name: "refreshable provider ignores environment expiry", source: "CredentialsEndpointProvider", expiry: time.Now().Add(-time.Minute).Format(time.RFC3339), code: "DoesNotExistException", reason: "the SSM session no longer exists", status: 400, requests: 1},
-		{name: "plain server failure remains retryable", body: "private upstream detail", reason: "SSM recovery exceeded 1m", status: 503, requests: -1},
+		{name: "plain server failure remains retryable", body: "private upstream detail", reason: "SSM recovery exceeded 1 minute", status: 503, requests: -1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("AWS_CREDENTIAL_EXPIRATION", tc.expiry)

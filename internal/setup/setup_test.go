@@ -165,7 +165,7 @@ func TestWizardDiscoveryPermissionFailures(t *testing.T) {
 	}
 }
 
-func TestCancelledWizardWritesNothing(t *testing.T) {
+func TestCanceledWizardWritesNothing(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -219,7 +219,7 @@ func successfulVerification(context.Context, *profile.Profile) error { return ni
 func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
 	t.Parallel()
 	ca := testutil.CA(t)
-	for _, result := range []string{"success", "login failure", "cleanup failure", "cancelled"} {
+	for _, result := range []string{"success", "login failure", "cleanup failure", "canceled"} {
 		t.Run(result, func(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "profiles.json")
@@ -243,7 +243,7 @@ func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
 				switch result {
 				case "success":
 					return nil
-				case "cancelled":
+				case "canceled":
 					cancel()
 					return nil
 				default:
@@ -261,7 +261,7 @@ func TestWizardOnlySavesAfterSuccessfulVerification(t *testing.T) {
 				assert.NotContains(t, output.String(), "Verify access with")
 				return
 			}
-			if result == "cancelled" {
+			if result == "canceled" {
 				require.ErrorIs(t, err, context.Canceled)
 			} else {
 				require.ErrorIs(t, err, failure)
@@ -327,7 +327,7 @@ func TestWizardPasswordAuthentication(t *testing.T) {
 		{name: "linked master", input: "2\n\n\n\n", secret: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:master", user: "admin"},
 		{name: "custom secret", input: "2\napplication/reader\n\nreader\n", secret: "application/reader", user: "reader"},
 		{name: "IAM disabled", input: "\n\n\n\n", secret: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:master", user: "admin", disableIAM: true},
-		{name: "cancelled", input: "2\napplication/reader\n\nreader\n", cancel: true},
+		{name: "canceled", input: "2\napplication/reader\n\nreader\n", cancel: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

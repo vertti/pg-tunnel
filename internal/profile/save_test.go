@@ -64,7 +64,7 @@ func TestSaveRefusesUnsafeDestinations(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB))
 	t.Cleanup(func() { require.NoError(t, lock.Close()) })
-	require.ErrorContains(t, profile.Save(path, "dev", &p), "retry after the other setup")
+	require.ErrorContains(t, profile.Save(path, "dev", &p), "retry after the other pg-tunnel init")
 	assert.NoFileExists(t, path)
 }
 

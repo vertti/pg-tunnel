@@ -46,7 +46,7 @@ func runSession(ctx context.Context, mode string, args []string, stdout, stderr 
 	}
 	if len(command) > 0 {
 		if _, err = exec.LookPath(command[0]); err != nil {
-			return fmt.Errorf("find command before connecting: %w", err)
+			return fmt.Errorf("cannot run %q: %w; install it or give its full path", command[0], errors.Unwrap(err))
 		}
 	}
 	p, err := profile.Load(path, name)
@@ -180,10 +180,7 @@ func execute(ctx context.Context, p *profile.Profile, command session.Command, r
 		Command: command,
 	}
 	configureRunner(&runner)
-	if err = runner.Run(ctx); err != nil {
-		return fmt.Errorf("database session: %w", err)
-	}
-	return nil
+	return runner.Run(ctx) //nolint:wrapcheck // Session errors name the step that failed.
 }
 
 func prepareRootCert(ctx context.Context, p *profile.Profile, region string, report func(string)) error {
@@ -256,7 +253,7 @@ func usesSSO(shared *config.SharedConfig) bool {
 func credentialsError(cfg *aws.Config, err error) error {
 	shared := sharedConfig(cfg)
 	if usesSSO(&shared) {
-		return fmt.Errorf("no usable AWS credentials; AWS profile %s uses IAM Identity Center; log in with aws sso login --profile %s: %w", shared.Profile, shared.Profile, err)
+		return fmt.Errorf("no usable AWS credentials; AWS profile %s uses AWS SSO; log in with aws sso login --profile %s: %w", shared.Profile, shared.Profile, err)
 	}
 	// The SDK falls back to the EC2 instance role only when nothing else configures credentials.
 	if aws.IsCredentialsProvider(cfg.Credentials, &ec2rolecreds.Provider{}) {

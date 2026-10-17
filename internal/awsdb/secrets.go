@@ -73,7 +73,7 @@ func passwordCredential(value string, target session.Target) (session.Credential
 		return session.Credential{}, errors.New("secret must be a JSON object with string username/password fields and an optional numeric port")
 	}
 	if secret.Username != target.User || secret.Username == "" {
-		return session.Credential{}, errors.New("secret username does not match the configured database user; choose the correct secret/user (alternating-user rotation is not supported)")
+		return session.Credential{}, fmt.Errorf("secret username %q does not match database user %q; choose the matching secret or user (alternating-user rotation is not supported)", secret.Username, target.User)
 	}
 	if secret.Password == "" || strings.ContainsAny(secret.Password, "\r\n\x00") {
 		return session.Credential{}, errors.New("secret password is empty or contains characters unsupported by PostgreSQL password files")
@@ -89,10 +89,10 @@ func (secret *databaseSecret) validateEndpoint(target session.Target) error {
 		return errors.New("secret engine is not postgres")
 	}
 	if secret.Host != "" && !strings.EqualFold(strings.TrimSuffix(secret.Host, "."), strings.TrimSuffix(target.Host, ".")) {
-		return errors.New("secret host does not match the configured database endpoint")
+		return fmt.Errorf("secret host %q does not match database host %q", secret.Host, target.Host)
 	}
 	if port, err := secret.Port.Int64(); secret.Port != "" && (err != nil || port != int64(target.Port)) {
-		return errors.New("secret port does not match the configured database endpoint")
+		return fmt.Errorf("secret port %q does not match database port %d", secret.Port.String(), target.Port)
 	}
 	return nil
 }
