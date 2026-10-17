@@ -19,7 +19,7 @@ import (
 // Files creates isolated libpq settings in a directory owned by the current user.
 // When a session gets its fixed LocalPort, or any port with AnyPort, it also keeps
 // a block in the shared Pgpass file so apps started outside the session can connect
-// to localhost.
+// to 127.0.0.1.
 type Files struct {
 	Report    func(string)
 	Root      string
@@ -93,7 +93,7 @@ func (c *client) Update(credential session.Credential) error {
 	if credential.Secret == "" || strings.ContainsAny(credential.Secret, "\r\n\x00") {
 		return errors.New("credential is empty or contains unsupported control characters")
 	}
-	// The local lines keep a 127.0.0.1 connection string working when PGPASSFILE points here.
+	// The local line keeps a 127.0.0.1 connection string working when PGPASSFILE points here.
 	lines := append([]string{pgpassLine(c.target.Host, strconv.Itoa(c.port), c.target.Database, c.target.User, credential.Secret)}, c.localLines(credential.Secret)...)
 	if err := atomicWrite(c.dir, "pgpass", strings.Join(lines, "\n")+"\n"); err != nil {
 		return err
